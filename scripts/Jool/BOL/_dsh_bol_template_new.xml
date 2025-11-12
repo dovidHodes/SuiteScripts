@@ -1,0 +1,802 @@
+<?xml version="1.0"?>
+<!DOCTYPE pdf PUBLIC "-//big.faceless.org//report" "report-1.1.dtd">
+<pdf>
+    <#if JSON?has_content>
+        <#list JSON.record as record>
+
+            <head>
+                <link name="NotoSans" type="font" subtype="truetype" src="${nsfont.NotoSans_Regular}" src-bold="${nsfont.NotoSans_Bold}" src-italic="${nsfont.NotoSans_Italic}" src-bolditalic="${nsfont.NotoSans_BoldItalic}" bytes="2" />
+                <#if .locale=="zh_CN">
+                    <link name="NotoSansCJKsc" type="font" subtype="opentype" src="${nsfont.NotoSansCJKsc_Regular}" src-bold="${nsfont.NotoSansCJKsc_Bold}" bytes="2" />
+                    <#elseif .locale=="zh_TW">
+                        <link name="NotoSansCJKtc" type="font" subtype="opentype" src="${nsfont.NotoSansCJKtc_Regular}" src-bold="${nsfont.NotoSansCJKtc_Bold}" bytes="2" />
+                        <#elseif .locale=="ja_JP">
+                            <link name="NotoSansCJKjp" type="font" subtype="opentype" src="${nsfont.NotoSansCJKjp_Regular}" src-bold="${nsfont.NotoSansCJKjp_Bold}" bytes="2" />
+                            <#elseif .locale=="ko_KR">
+                                <link name="NotoSansCJKkr" type="font" subtype="opentype" src="${nsfont.NotoSansCJKkr_Regular}" src-bold="${nsfont.NotoSansCJKkr_Bold}" bytes="2" />
+                                <#elseif .locale=="th_TH">
+                                    <link name="NotoSansThai" type="font" subtype="opentype" src="${nsfont.NotoSansThai_Regular}" src-bold="${nsfont.NotoSansThai_Bold}" bytes="2" />
+                </#if>
+
+                <style type="text/css">
+                    table {
+                        <#if .locale=="zh_CN">font-family: stsong, sans-serif;
+                        <#elseif .locale=="zh_TW">font-family: msung, sans-serif;
+                        <#elseif .locale=="ja_JP">font-family: heiseimin, sans-serif;
+                        <#elseif .locale=="ko_KR">font-family: hygothic, sans-serif;
+                        <#elseif .locale=="ru_RU">font-family: verdana;
+                        <#else>font-family: sans-serif;
+                        </#if>font-size: 9pt;
+                        table-layout: fixed;
+                    }
+                    
+                    th {
+                        font-weight: bold;
+                        font-size: 8pt;
+                        vertical-align: middle;
+                        padding: 5px 6px 3px;
+                        background-color: #e3e3e3;
+                        color: #333333;
+                    }
+                    
+                    td {
+                        padding: 4px 6px;
+                    }
+                    
+                    b {
+                        font-weight: bold;
+                        color: #333333;
+                    }
+                    
+                    table.header td {
+                        padding: 0;
+                        font-size: 10pt;
+                    }
+                    
+                    table.footer td {
+                        padding: 0;
+                        font-size: 8pt;
+                    }
+                    
+                    table.itemtable th {
+                        padding-bottom: 10px;
+                        padding-top: 10px;
+                    }
+                    
+                    table.body td {
+                        padding-top: 2px;
+                    }
+                    
+                    td.addressheader {
+                        font-size: 8pt;
+                        padding-top: 6px;
+                        padding-bottom: 2px;
+                    }
+                    
+                    td.address {
+                        padding-top: 0;
+                    }
+                    
+                    span.title {
+                        font-size: 28pt;
+                    }
+                    
+                    span.number {
+                        font-size: 16pt;
+                    }
+                    
+                    span.itemname {
+                        font-weight: bold;
+                        line-height: 150%;
+                    }
+                    
+                    hr {
+                        width: 100%;
+                        color: #d3d3d3;
+                        background-color: #d3d3d3;
+                        height: 1px;
+                    }
+                </style>
+            </head>
+
+            <body header="nlheader" header-height="0pt" footer="nlfooter" footer-height="20pt" padding="0.2in 0.25in 0.25in 0.2in" size="Letter">
+
+                <table border="1" style="margin-top:5px;width:100%;">
+                    <tr>
+                        <td width="20%"><span style="font-size:12px;"><strong><u>Date:</u>&nbsp;</strong>${record.trandate}</span></td>
+                       <#if record.pdfType ="masterandinvd" && record.isconsolidated = 'true' > <td width="60%" align="center"><strong><span style="font-size:18px;">
+                      MASTER BILL OF LADING</span></strong></td><#else><td width="60%" align="center"><strong><span style="font-size:18px;"> BILL OF LADING</span></strong></td></#if>
+                       <!-- Template Version: DSH_SVC_BOL v1.0 - Updated 2025-01-12 -->
+                       <!-- <td width="20%"><span style="font-size:12px;">Page <#if record.pdfType ="standalone"><pagenumber/><#else>${record.pageNum}</#if> of:<u><#if record.pdfType ="standalone"><pagenumber/><#else>${record.totalPages}</#if><commented<pagenumber/></u></span></td>-->
+                          <#assign MastertotalRow=0>
+                        <#list record.shipperInfoArr as item>
+                          <#assign  MastertotalRow=MastertotalRow +1>
+                          </#list>
+      <td width="20%"><span style="font-size:12px;">Page 1 of: <#if record.pdfType ="masterandinvd" && MastertotalRow gte 9><u>2</u><#else><u><pagenumber/></u></#if></span></td>
+                    </tr>
+                </table>
+
+                <table border="1" style="margin-top:0px;width:100%;">
+                    <tr>
+                        <td width="60%" align="center" style="font-size: 10pt; padding: 0px; font-weight: bold; color: white; background-color: rgb(0, 0, 0);">SHIP FROM: </td>
+                     <td rowspan="2" width="40%" border-left="1" style="font-weight: bold; text-align: left;">Bill of Lading Number: 
+                          <#if record.pdfType ="masterandinvd" && record.isconsolidated = 'true' ><#if record.mblNumber=''>${record.bolNumber}<#else>${record.mblNumber}</#if><#else>${record.bolNumber}</#if><br/>Load Id: ${record.loadID}
+                       <!--<#if record.isconsolidated == 'true'>${record.bolNumber}<#else>${record.bolNumber}</#if>-->
+                         <br /><span style="color: #c0c0c0; font-size:13pt; font-weight:bold; align:center;">BAR CODE SPACE</span><br />
+
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>
+
+                            <table width="100%" style="margin:0px;">
+                                <tr>
+                                   
+                                      
+                                  <td width="80%" padding-top="0px"  >Address: ${record.shipFromFullInfo} </td>
+                                    
+
+                                </tr>
+                                    <!--<td width="80%" padding-top="0px">Address: ${record.shipFromFullInfo.addressee} ${record.shipFromFullInfo.address1},&nbsp; ${record.shipFromFullInfo.address2},&nbsp; ${record.shipFromFullInfo.address3}
+                                        <#if record.shipFromFullInfo.addr2?has_content><br />${record.shipFromFullInfo.address1},&nbsp; ${record.shipFromFullInfo.address2},&nbsp; ${record.shipFromFullInfo.address3}<br />
+                                          <#else><br /></#if> </td>
+                                    
+
+                                </tr>-->
+                              <!--  <tr>
+                                    <td width="80%" padding-top="0px">City/State/Zip: ${record.shipFromFullInfo.city},&nbsp;${record.shipFromFullInfo.state},&nbsp;${record.shipFromFullInfo.zip},&nbsp;${record.shipFromFullInfo.country} </td>
+                                </tr>-->
+                                <tr>
+                                    <td width="80%" padding-top="0px">SID#: </td>
+                                    <td><#if record.shipFromfobVal = 'T'><img src= "https://8227984.app.netsuite.com/core/media/media.nl?id=38268&amp;c=8227984&amp;h=rgmnWWLYHZ44SjOgWoueBvOZXWKMdcoWwGJJAb4EP2ijCp9t" width="10px" height="10px" /></#if>FOB</td>
+                                    <!--<td width="20%" padding-top="0px">FOB</td>-->
+                                </tr>
+
+                            </table>
+                        </td>
+                    </tr>
+                </table>
+
+                <table border="1" width="100%" style="margin:0px;">
+                    <tr>
+                        <td width="60%" align="center" style="font-size: 10pt; padding: 0px; font-weight: bold; color: white; background-color: rgb(0, 0, 0);">SHIP TO:</td>
+                        <td width="40%" border-left="1" style="font-weight: bold; text-align: left; vertical-align: middle;"><strong>Carrier Name:&nbsp;</strong>${record.shipmethod}</td>
+                    </tr>
+                    <tr>
+                        <td>
+                            <!--Ship To, T Party Freight Charges, Special Instructions-->
+                            <table width="100%" style="margin:0px;">
+
+
+                                <!--Ship To-->
+                              <tr>
+                                    <td width="80%" style="padding-top: 0px;">
+                                       Name: ${record.shipToFullInfo.addressee}<br />Address: ${record.shipToFullInfo.shipaddress1}
+                                      
+                                        <br /> City/State/Zip: ${record.shipToFullInfo.city},&nbsp;${record.shipToFullInfo.state},&nbsp;${record.shipToFullInfo.zip}</td>
+                                    <!--FOB-->
+                                    <td width="30%">Location: ${record.shipToFullInfo.country}</td>
+                                </tr>
+                              
+                                <tr>
+                                    <td width="80%" padding-top="0px">CID#: ${record.shiptocid}</td>
+                                    <td><#if record.shipTofobVal = 'T'><img src= "https://8227984.app.netsuite.com/core/media/media.nl?id=38268&amp;c=8227984&amp;h=rgmnWWLYHZ44SjOgWoueBvOZXWKMdcoWwGJJAb4EP2ijCp9t" width="10px" height="10px" /></#if>FOB</td>
+                                    <!--<td width="20%" padding-top="0px">FOB</td>-->
+                                </tr>
+
+                                <tr>
+                                    <!--Third Party Freight Charges Bill To-->
+                                    <td colspan="2" align="center" style="padding: 3px; vertical-align: middle; font-weight: bold; font-size: 8pt; color: white; background-color: rgb(0, 0, 0);">THIRD PARTY FREIGHT CHARGES BILL TO: </td>
+                                </tr>
+                                <tr>
+                                    <td>
+
+                                        <table width="100%" style="margin:0px;">
+
+                                            <tr>
+                                                <td width="80%" padding-top="0px">Name: </td>
+
+                                            </tr>
+                                            <tr>
+                                                <td width="80%" padding-top="0px">Address: </td>
+
+                                            </tr>
+                                            <tr>
+                                                <td width="80%" padding-top="0px">City/State/Zip: </td>
+
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td colspan="2" border-bottom="1" padding-top="1px">
+                                        <#if record.entity.id=='240405'>${record.custbody_gbs_third_party_bill_to}
+                                            <#else>${record.customer}</#if>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <!--Special Instructions-->
+                                    <td colspan="2">
+                                        <#if record.custbody_gbs_liftgate_req?has_content && record.custbody_gbs_liftgate_req==true>
+                                            <span style="font-size: 20pt; font-weight: bold;">Liftgate Required</span>
+                                        </#if>
+                                      <#if record.department?has_content><br/>${record.department}</#if><#if record.potype?has_content><br/>${record.potype}</#if><#if record.vendorNumber?has_content><br/>${record.vendorNumber}</#if>
+                                      <#if record.pdfType ="masterandinvd" && record.isconsolidated = 'true' ><#if record.mabdDateCommon?has_content><br/>${record.mabdDateCommon}</#if><#else><#if record.mabdDate?has_content><br/>${record.mabdDate}</#if></#if> <#if record.arnNumber?has_content><br/>ARN number: ${record.arnNumber}</#if>
+                                    </td>
+                                  
+                                </tr>
+                            </table>
+                        </td>
+                        <td border-left="1">
+                            <table width="100%">
+                                <!--Trailer Number, Seal Number, SCAC, Pro Number, Freight Charge Terms, etc.-->
+                                <tr>
+                                    <td colspan="3">Trailer Number: </td>
+                                </tr>
+                                <tr>
+                                    <td colspan="3" border-bottom="1">Seal Number(s): </td>
+                                </tr>
+                                <tr>
+                                    <td colspan="3"><b>SCAC: ${record.scac}</b> </td>
+                                </tr>
+                                <tr>
+                                    <td colspan="3"><b>Pro Number: ${record.proNumber} </b></td>
+                                </tr>
+                                <tr>
+                                    <td colspan="3" border-bottom="1" style="color: #c0c0c0; font-size:13pt; font-weight:bold;" align="center">BAR CODE SPACE<br /></td>
+                                </tr>
+                                <tr>
+                                    <td colspan="3"><b>Freight Charge Terms: <i>(freight charges are prepaid unless marked otherwise)</i></b></td>
+                                </tr>
+                              
+                              <tr>
+                                  <td width="25%" style="margin-left:12px;"><#if record.frieghtChargeTerms = 'Prepaid selection'><img src = "https://8227984.app.netsuite.com/core/media/media.nl?id=38268&amp;c=8227984&amp;h=rgmnWWLYHZ44SjOgWoueBvOZXWKMdcoWwGJJAb4EP2ijCp9t" width="10px" height="10px" /></#if></td>
+                                    <td width="25%" style="margin-left:12px;"><#if record.frieghtChargeTerms = 'Collect'><img src = "https://8227984.app.netsuite.com/core/media/media.nl?id=38268&amp;c=8227984&amp;h=rgmnWWLYHZ44SjOgWoueBvOZXWKMdcoWwGJJAb4EP2ijCp9t" width="10px" height="10px" /></#if></td>
+                                    <td width="50%" style="margin-left:12px;">
+                                    <#if record.frieghtChargeTerms = '3rd party selection'><img src = "https://8227984.app.netsuite.com/core/media/media.nl?id=38268&amp;c=8227984&amp;h=rgmnWWLYHZ44SjOgWoueBvOZXWKMdcoWwGJJAb4EP2ijCp9t" width="10px" height="10px" /></#if>
+     
+                                    </td>
+                                </tr>
+                                <tr>
+                                  <td width="25%" border-bottom="1"><b>Prepaid</b></td>
+                                    <td width="25%" border-bottom="1"><b>Collect</b></td>
+                                    <td width="50%" border-bottom="1">
+                                   
+                                        <p><b>3rd Party</b></p>
+                                    </td>
+                                </tr>
+                              <tr>
+                                  <td colspan="3" style="margin-left:122px;"><#if record.isconsolidated = 'true'><img src = "https://8227984.app.netsuite.com/core/media/media.nl?id=38268&amp;c=8227984&amp;h=rgmnWWLYHZ44SjOgWoueBvOZXWKMdcoWwGJJAb4EP2ijCp9t" width="15px" height="15px"/></#if></td>
+                                 
+                                   
+                                </tr>
+                                <tr>
+                                  <td colspan="3" align="center">(check box)</td>
+                                
+                                    
+                                </tr>
+                              <tr> <td colspan="3" align="center">Master Bill of Lading with attached underlying Bills of</td></tr>
+                              <tr> <td colspan="3" align="center">Lading</td></tr>
+                            </table>
+                            <!--End Trailer Number, Seal Number, SCAC, Pro Number, Freight Charge Terms, etc.-->
+                        </td>
+                        <!--
+	<td border-left="1" colspan="7" style="padding: 0px; height: 1px; vertical-align: bottom;">&nbsp;Trailer number:</td>
+	</tr>
+	<tr>
+	<td border-left="1" colspan="7" style="padding: 0px; height: 1px; vertical-align: bottom;">&nbsp;Seal number (s):</td>
+	</tr>
+	<tr>
+	<td colspan="1" rowspan="2" style="padding: 0px; height: 1px;">&nbsp;</td>
+	<td border-left="1" border-top="1" colspan="7" style="padding: 0px; height: 1px; vertical-align: bottom;"><strong>&nbsp;SCAC:</strong></td>
+	</tr>
+	<tr>
+	<td border-left="1" colspan="7" style="padding: 0px; height: 1px; vertical-align: bottom;">&nbsp;<strong>Pro Number:</strong></td>
+	-->
+                    </tr>
+                </table>
+
+                <!--
+	<tr>
+	<td colspan="10" style="padding: 0px; height: 1px; background-color: rgb(0, 0, 0); color: white; font-weight: bold; vertical-align: middle; text-align: center;">&nbsp; &nbsp; &nbsp; THIRD PARTY <span style="font-size:12px;">FREIGHT</span> CHARGES BILL TO:</td>
+	<td border-left="1" colspan="7" style="padding: 0px; height: 1px; vertical-align: bottom;">&nbsp;</td>
+	</tr>
+	<tr>
+	<td colspan="10" rowspan="4" style="padding: 0px; height: 1px; font-weight: bold; vertical-align: top; text-align: left;"><#if record.entity.id == '240405'>${record.custbody_gbs_third_party_bill_to}<#else>${record.entity.custentity_customer_bol_addr}</#if></td>
+	<td border-left="1" colspan="7" style="padding: 0px; height: 1px; text-align: left; vertical-align: top;">&nbsp;</td>
+	</tr>
+	<tr>
+	<td border-left="1" colspan="7" style="padding: 0px; height: 1px; color: gray; text-align: left; vertical-align: top;">&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;Barcode Space</td>
+	</tr>
+	<tr>
+	<td border-left="1" colspan="7" style="padding: 0px; height: 1px; color:white ">Barcode Space</td>
+	</tr>
+	<tr>
+	<td border-left="1" border-top="1" colspan="7" rowspan="2" style="padding: 0px; height: 1px;"><strong>&nbsp;Freight Charge Terms:</strong> <u><em>(freight charges are prepaid unless&nbsp; &nbsp;marked otherwise</em></u><br /><br /><span style="font-size:10px;"><strong>&nbsp;Prepaid </strong>____&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;<strong>Collect</strong> _____&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;<strong>3rd Party</strong></span> <u>XX</u>&nbsp;<br /><br />&nbsp;</td>
+	</tr>
+	<tr>
+	<td border-top="1" colspan="7" rowspan="2" style="padding: 0px; height: 1px; vertical-align: top; width: 216px;">SPECIAL INSTRUCTIONS:</td>
+	<td border-top="1" colspan="3" rowspan="4" style="padding: 0px; height: 1px; vertical-align: top; width: 218px;">&nbsp;</td>
+	</tr>
+	<tr>
+	<td border-left="1" border-top="1" colspan="1" rowspan="3" style="padding: 0px; height: 1px;">&nbsp;_____<br />&nbsp;(check)</td>
+	<td border-top="1" colspan="6" rowspan="3" style="padding: 0px; height: 1px;"><span style="font-size:12px;">&nbsp; </span><span style="font-size:10px;">&nbsp;Master Bill of Lading: with attached<br />&nbsp; &nbsp; &nbsp;underlying Bills of Lading</span><br />&nbsp;</td>
+	</tr>
+	<tr>
+	<td colspan="7" style="padding: 0px; height: 1px; vertical-align: top; width: 216px;">&nbsp;</td>
+	</tr>
+	<tr>
+	<td colspan="7" rowspan="1" style="padding: 0px; height: 1px; width: 216px;">&nbsp;</td>
+	</tr>
+    -->
+                <table border="1" style="margin-top:0px;width:100%;">
+                    <tr>
+                        <td colspan="23" style="padding: 0px; color: white; height: 1px; background-color: rgb(0, 0, 0);"><strong>&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;
+                          
+                          </strong></td>
+                    </tr>
+                    <#assign weighttotal=0>
+                      <#assign totalRow=0>
+                        <#list record.shipperInfoArr as item>
+                          <#assign  totalRow=totalRow +1>
+                          </#list>
+                          
+                          
+                          <#assign count = 0>
+          <#list record.shipperInfoArr as item>
+        <#assign count = count + 1>
+</#list>
+      
+                        <#list record.items as item>
+                         
+                            <#assign weighttotal=weighttotal + (item.custpage_subitem_weight * item.custpage_subitem_quantity)/>
+                        </#list>
+                        <tr>
+                            <td border-top="1" border-right="1" colspan="5" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>ORDER NUMBER</b></td>
+                            <td border-top="1" border-right="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>DC# </b></td>
+                            <td border-top="1" border-right="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>#PKGS</b></td>
+                              <td border-top="1" border-right="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>CUBE</b></td>
+                            <td border-top="1" border-right="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>WEIGHT</b></td>
+                            <td border-top="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>PALLETS</b></td>
+                            <td border-left="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px;"> <b>PALLET/SLIP</b><span style="font-size:8px;">&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; <b>(CIRCLE ONE)</b></span></td>
+                            <td border-left="1" colspan="6" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>ADDITIONAL SHIPPER INFO </b></td>
+                        </tr> 
+
+                        <#if record?has_content>                      
+                        <#list record.shipperInfoArr as Data>
+
+                          <#if Data?counter == 31>
+                          </table>
+                            <table border="1" style="margin-top:5px;width:100%;">
+                        <tr>
+                            <td width="20%"><span style="font-size:12px;"><strong><u>Date:</u>&nbsp;</strong>${record.trandate}</span></td>
+                           <#if record.pdfType ="masterandinvd" && record.isconsolidated = 'true' > <td width="60%" align="center"><strong><span style="font-size:18px;">
+                           MASTER BILL OF LADING #<#if record.mblNumber=''>${record.bolNumber}<#else>${record.mblNumber}</#if> </span></strong></td><#else><td width="60%" align="center"><strong><span style="font-size:18px;"> BILL OF LADING</span></strong></td></#if>
+                           <!-- <td width="20%"><span style="font-size:12px;">Page <#if record.pdfType ="standalone"><pagenumber/><#else>${record.pageNum}</#if> of:<u><#if record.pdfType ="standalone"><pagenumber/><#else>${record.totalPages}</#if><commented<pagenumber/></u></span></td>-->
+                              <#assign MastertotalRow=0>
+                            <#list record.shipperInfoArr as item>
+                              <#assign  MastertotalRow=MastertotalRow +1>
+                              </#list>
+            <td width="20%"><span style="font-size:12px;">Page 2 of:<u> 2</u></span></td>
+                        </tr>
+                    </table>
+                    
+
+                    <table border="1" style="margin-top:0px;width:100%;">
+                        <tr>
+                            <td colspan="23" style="padding: 0px; color: white; height: 1px; background-color: rgb(0, 0, 0);"><strong>&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;
+                              
+                              </strong></td>
+                        </tr>
+                        <tr>
+                            <td border-top="1" border-right="1" colspan="5" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>ORDER NUMBER</b></td>
+                            <td border-top="1" border-right="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>DC# </b></td>
+                            <td border-top="1" border-right="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>#PKGS</b></td>
+                              <td border-top="1" border-right="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>CUBE</b></td>
+                            <td border-top="1" border-right="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>WEIGHT</b></td>
+                            <td border-top="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>PALLETS</b></td>
+                            <td border-left="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px;"> <b>PALLET/SLIP</b><span style="font-size:8px;">&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; <b>(CIRCLE ONE)</b></span></td>
+                            <td border-left="1" colspan="6" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>ADDITIONAL SHIPPER INFO </b></td>
+                        </tr> 
+
+                    </#if>
+                
+                        <tr>
+                            <td border-right="1" border-top="1" colspan="5" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: left"><b>${Data.relatedPO}</b></td>
+                            <td border-top="1" border-right="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>${Data.dcNum!''}</b></td>
+                            <td border-top="1" border-right="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>${Data.pkgCount}</b></td>
+                           <td border-top="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>${Data.cube}</b></td>  
+                             <td border-left="1" border-top="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 70px; vertical-align: middle; align: center"><b>${Data.weight}</b></td>
+                             <td border-top="1" border-left="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>${Data.palletCount}</b></td>
+                              
+
+                            <td border-left="1" border-top="1" style="padding: 0px; height: 1px;">&nbsp; &nbsp; &nbsp;Y</td>
+                            <td border-left="1" border-top="1" style="padding: 0px; height: 1px;">&nbsp; &nbsp; &nbsp;N</td>
+                           <td border-left="1" border-top="1" colspan="6" style="padding: 0px; height: 1px;"><strong>&nbsp;</strong></td><!--DEPT: ${Data.department} PO type: ${Data.potype}</td>-->
+                             </tr>  
+                        
+                          </#list>
+                            </#if>
+						<#if totalRow == 30>
+						</table>
+                            <table border="1" style="margin-top:5px;width:100%;">
+                        <tr>
+                            <td width="20%"><span style="font-size:12px;"><strong><u>Date:</u>&nbsp;</strong>${record.trandate}</span></td>
+                           <#if record.pdfType ="masterandinvd" && record.isconsolidated = 'true' > <td width="60%" align="center"><strong><span style="font-size:18px;">
+                           MASTER BILL OF LADING #<#if record.mblNumber=''>${record.bolNumber}<#else>${record.mblNumber}</#if> </span></strong></td><#else><td width="60%" align="center"><strong><span style="font-size:18px;"> BILL OF LADING</span></strong></td></#if>
+                           <!-- <td width="20%"><span style="font-size:12px;">Page <#if record.pdfType ="standalone"><pagenumber/><#else>${record.pageNum}</#if> of:<u><#if record.pdfType ="standalone"><pagenumber/><#else>${record.totalPages}</#if><commented<pagenumber/></u></span></td>-->
+                              <#assign MastertotalRow=0>
+                            <#list record.shipperInfoArr as item>
+                              <#assign  MastertotalRow=MastertotalRow +1>
+                              </#list>
+            <td width="20%"><span style="font-size:12px;">Page 2 of:<u> 2</u></span></td>
+                        </tr>
+                    </table>
+                    
+
+                    <table border="1" style="margin-top:0px;width:100%;">
+                        <tr>
+                            <td colspan="23" style="padding: 0px; color: white; height: 1px; background-color: rgb(0, 0, 0);"><strong>&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;
+                              
+                              </strong></td>
+                        </tr>
+                        <tr>
+                            <td border-top="1" border-right="1" colspan="5" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>ORDER NUMBER</b></td>
+                            <td border-top="1" border-right="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>DC# </b></td>
+                            <td border-top="1" border-right="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>#PKGS</b></td>
+                              <td border-top="1" border-right="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>CUBE</b></td>
+                            <td border-top="1" border-right="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>WEIGHT</b></td>
+                            <td border-top="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>PALLETS</b></td>
+                            <td border-left="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px;"> <b>PALLET/SLIP</b><span style="font-size:8px;">&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; <b>(CIRCLE ONE)</b></span></td>
+                            <td border-left="1" colspan="6" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>ADDITIONAL SHIPPER INFO </b></td>
+                        </tr> 
+
+                    </#if>
+						
+                       <tr>
+                            <td border-right="1" border-top="1" colspan="5" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: left"><b>&nbsp;</b></td>
+                            <td border-top="1" border-right="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>&nbsp;</b></td>
+                            <td border-top="1" border-right="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>&nbsp;</b></td>
+                            <td border-top="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>&nbsp;</b></td>
+                             <td border-left="1" border-top="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 70px; vertical-align: middle; align: center"><b>&nbsp;</b></td>
+                             <td border-top="1" border-left="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>&nbsp;</b></td>
+                              
+
+                            <td border-left="1" border-top="1" style="padding: 0px; height: 1px;">&nbsp; &nbsp; &nbsp;Y</td>
+                            <td border-left="1" border-top="1" style="padding: 0px; height: 1px;">&nbsp; &nbsp; &nbsp;N</td>
+                           <td border-left="1" border-top="1" colspan="6" style="padding: 0px; height: 1px;"><strong>&nbsp;</strong></td>
+                             </tr> 
+							 
+							 <#if totalRow == 29>
+						</table>
+                            <table border="1" style="margin-top:5px;width:100%;">
+                        <tr>
+                            <td width="20%"><span style="font-size:12px;"><strong><u>Date:</u>&nbsp;</strong>${record.trandate}</span></td>
+                           <#if record.pdfType ="masterandinvd" && record.isconsolidated = 'true' > <td width="60%" align="center"><strong><span style="font-size:18px;">
+                           MASTER BILL OF LADING #<#if record.mblNumber=''>${record.bolNumber}<#else>${record.mblNumber}</#if> </span></strong></td><#else><td width="60%" align="center"><strong><span style="font-size:18px;"> BILL OF LADING</span></strong></td></#if>
+                           <!-- <td width="20%"><span style="font-size:12px;">Page <#if record.pdfType ="standalone"><pagenumber/><#else>${record.pageNum}</#if> of:<u><#if record.pdfType ="standalone"><pagenumber/><#else>${record.totalPages}</#if><commented<pagenumber/></u></span></td>-->
+                              <#assign MastertotalRow=0>
+                            <#list record.shipperInfoArr as item>
+                              <#assign  MastertotalRow=MastertotalRow +1>
+                              </#list>
+            <td width="20%"><span style="font-size:12px;">Page 2 of:<u> 2</u></span></td>
+                        </tr>
+                    </table>
+                    
+
+                    <table border="1" style="margin-top:0px;width:100%;">
+                        <tr>
+                            <td colspan="23" style="padding: 0px; color: white; height: 1px; background-color: rgb(0, 0, 0);"><strong>&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;
+                              
+                              </strong></td>
+                        </tr>
+                        <tr>
+                            <td border-top="1" border-right="1" colspan="5" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>ORDER NUMBER</b></td>
+                            <td border-top="1" border-right="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>DC# </b></td>
+                            <td border-top="1" border-right="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>#PKGS</b></td>
+                              <td border-top="1" border-right="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>CUBE</b></td>
+                            <td border-top="1" border-right="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>WEIGHT</b></td>
+                            <td border-top="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>PALLETS</b></td>
+                            <td border-left="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px;"> <b>PALLET/SLIP</b><span style="font-size:8px;">&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; <b>(CIRCLE ONE)</b></span></td>
+                            <td border-left="1" colspan="6" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>ADDITIONAL SHIPPER INFO </b></td>
+                        </tr> 
+
+                    </#if>
+                      <tr>
+                            <td border-right="1" border-top="1" colspan="5" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: left"><b>&nbsp;</b></td>
+                            <td border-top="1" border-right="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>&nbsp;</b></td>
+                            <td border-top="1" border-right="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>&nbsp;</b></td>
+                            <td border-top="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>&nbsp;</b></td>
+                             <td border-left="1" border-top="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 70px; vertical-align: middle; align: center"><b>&nbsp;</b></td>
+                             <td border-top="1" border-left="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>&nbsp;</b></td>
+                              
+
+                            <td border-left="1" border-top="1" style="padding: 0px; height: 1px;">&nbsp; &nbsp; &nbsp;Y</td>
+                            <td border-left="1" border-top="1" style="padding: 0px; height: 1px;">&nbsp; &nbsp; &nbsp;N</td>
+                           <td border-left="1" border-top="1" colspan="6" style="padding: 0px; height: 1px;"><strong>&nbsp;</strong></td>
+                             </tr>
+							 
+							 <#if totalRow == 28>
+						</table>
+                            <table border="1" style="margin-top:5px;width:100%;">
+                        <tr>
+                            <td width="20%"><span style="font-size:12px;"><strong><u>Date:</u>&nbsp;</strong>${record.trandate}</span></td>
+                           <#if record.pdfType ="masterandinvd" && record.isconsolidated = 'true' > <td width="60%" align="center"><strong><span style="font-size:18px;">
+                           MASTER BILL OF LADING #<#if record.mblNumber=''>${record.bolNumber}<#else>${record.mblNumber}</#if> </span></strong></td><#else><td width="60%" align="center"><strong><span style="font-size:18px;"> BILL OF LADING</span></strong></td></#if>
+                           <!-- <td width="20%"><span style="font-size:12px;">Page <#if record.pdfType ="standalone"><pagenumber/><#else>${record.pageNum}</#if> of:<u><#if record.pdfType ="standalone"><pagenumber/><#else>${record.totalPages}</#if><commented<pagenumber/></u></span></td>-->
+                              <#assign MastertotalRow=0>
+                            <#list record.shipperInfoArr as item>
+                              <#assign  MastertotalRow=MastertotalRow +1>
+                              </#list>
+            <td width="20%"><span style="font-size:12px;">Page 2 of:<u> 2</u></span></td>
+                        </tr>
+                    </table>
+                    
+
+                    <table border="1" style="margin-top:0px;width:100%;">
+                        <tr>
+                            <td colspan="23" style="padding: 0px; color: white; height: 1px; background-color: rgb(0, 0, 0);"><strong>&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;
+                              
+                              </strong></td>
+                        </tr>
+                        <tr>
+                            <td border-top="1" border-right="1" colspan="5" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>ORDER NUMBER</b></td>
+                            <td border-top="1" border-right="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>DC# </b></td>
+                            <td border-top="1" border-right="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>#PKGS</b></td>
+                              <td border-top="1" border-right="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>CUBE</b></td>
+                            <td border-top="1" border-right="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>WEIGHT</b></td>
+                            <td border-top="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>PALLETS</b></td>
+                            <td border-left="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px;"> <b>PALLET/SLIP</b><span style="font-size:8px;">&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; <b>(CIRCLE ONE)</b></span></td>
+                            <td border-left="1" colspan="6" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>ADDITIONAL SHIPPER INFO </b></td>
+                        </tr> 
+
+                    </#if>
+                        <tr>
+                            <td border-right="1" border-top="1" colspan="5" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: left"><b>&nbsp;</b></td>
+                             <td border-top="1" border-right="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>&nbsp;</b></td>
+                              <td border-top="1" border-right="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>&nbsp;</b></td>
+                               <td border-top="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>&nbsp;</b></td>
+                            <td border-top="1" border-left="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>&nbsp;</b></td>
+                            <td border-left="1" border-top="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 70px; vertical-align: middle; align: center"><b>&nbsp;</b></td>                            <td border-left="1" border-top="1" style="padding: 0px; height: 1px;">&nbsp; &nbsp; &nbsp;Y</td>
+                            <td border-left="1" border-top="1" style="padding: 0px; height: 1px;">&nbsp; &nbsp; &nbsp;N</td>
+                            <td border-left="1" border-top="1" colspan="6" style="padding: 0px; height: 1px;">&nbsp;</td>
+                        </tr>
+						
+						<#if totalRow == 27>
+						</table>
+                            <table border="1" style="margin-top:5px;width:100%;">
+                        <tr>
+                            <td width="20%"><span style="font-size:12px;"><strong><u>Date:</u>&nbsp;</strong>${record.trandate}</span></td>
+                           <#if record.pdfType ="masterandinvd" && record.isconsolidated = 'true' > <td width="60%" align="center"><strong><span style="font-size:18px;">
+                           MASTER BILL OF LADING #<#if record.mblNumber=''>${record.bolNumber}<#else>${record.mblNumber}</#if> </span></strong></td><#else><td width="60%" align="center"><strong><span style="font-size:18px;"> BILL OF LADING</span></strong></td></#if>
+                           <!-- <td width="20%"><span style="font-size:12px;">Page <#if record.pdfType ="standalone"><pagenumber/><#else>${record.pageNum}</#if> of:<u><#if record.pdfType ="standalone"><pagenumber/><#else>${record.totalPages}</#if><commented<pagenumber/></u></span></td>-->
+                              <#assign MastertotalRow=0>
+                            <#list record.shipperInfoArr as item>
+                              <#assign  MastertotalRow=MastertotalRow +1>
+                              </#list>
+            <td width="20%"><span style="font-size:12px;">Page 2 of:<u> 2</u></span></td>
+                        </tr>
+                    </table>
+                    
+
+                    <table border="1" style="margin-top:0px;width:100%;">
+                        <tr>
+                            <td colspan="23" style="padding: 0px; color: white; height: 1px; background-color: rgb(0, 0, 0);"><strong>&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;
+                              
+                              </strong></td>
+                        </tr>
+                        <tr>
+                            <td border-top="1" border-right="1" colspan="5" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>ORDER NUMBER</b></td>
+                            <td border-top="1" border-right="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>DC# </b></td>
+                            <td border-top="1" border-right="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>#PKGS</b></td>
+                              <td border-top="1" border-right="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>CUBE</b></td>
+                            <td border-top="1" border-right="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>WEIGHT</b></td>
+                            <td border-top="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>PALLETS</b></td>
+                            <td border-left="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px;"> <b>PALLET/SLIP</b><span style="font-size:8px;">&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; <b>(CIRCLE ONE)</b></span></td>
+                            <td border-left="1" colspan="6" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>ADDITIONAL SHIPPER INFO </b></td>
+                        </tr> 
+
+                    </#if>
+					
+                      <tr>
+                            <td border-left="1" border-top="1" colspan="5" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><strong>GRAND TOTAL</strong></td>
+                            <td border-left="1" border-top="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>&nbsp;</b></td>
+                            <td border-left="1" border-top="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>${record.totalPkgCount}</b></td>
+                             <td border-left="1" border-top="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>&nbsp;</b></td>
+                            <td border-left="1" border-top="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 70px; vertical-align: middle; align: center"><b>${record.totalWeight}</b></td>
+                             <td border-left="1" border-top="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>&nbsp;</b></td>
+                            <td border-left="1" border-top="1" colspan="8" rowspan="1" style="padding: 0px; height: 1px; background-color: #e3e3e3; vertical-align: middle; align: center">&nbsp;</td>
+                        </tr>
+                        
+                       </table>
+                            
+                              <#if totalRow gte 9 && totalRow lt 25>
+                                <pbr></pbr>
+                                 <table border="1" style="margin-top:5px;width:100%;">
+                    <tr>
+                        <td width="20%"><span style="font-size:12px;"><strong><u>Date:</u>&nbsp;</strong>${record.trandate}</span></td>
+                       <#if record.pdfType ="masterandinvd" && record.isconsolidated = 'true' > <td width="60%" align="center"><strong><span style="font-size:18px;">
+                       MASTER BILL OF LADING #<#if record.mblNumber=''>${record.bolNumber}<#else>${record.mblNumber}</#if> </span></strong></td><#else><td width="60%" align="center"><strong><span style="font-size:18px;"> BILL OF LADING</span></strong></td></#if>
+                       <!-- <td width="20%"><span style="font-size:12px;">Page <#if record.pdfType ="standalone"><pagenumber/><#else>${record.pageNum}</#if> of:<u><#if record.pdfType ="standalone"><pagenumber/><#else>${record.totalPages}</#if><commented<pagenumber/></u></span></td>-->
+                          <#assign MastertotalRow=0>
+                        <#list record.shipperInfoArr as item>
+                          <#assign  MastertotalRow=MastertotalRow +1>
+                          </#list>
+        <td width="20%"><span style="font-size:12px;">Page 2 of:<u> 2</u></span></td>
+                    </tr>
+                </table>
+                
+                         <!-- <span align="right" style="margine-right:90px;font-size:12px;font-family:Gill Sans Extrabold,sans-serif;">Page 2 of: 2</span>-->
+<!-- Code for adding page break of rows in Table is more than 9-->
+                      </#if>
+					  
+					  <#if totalRow gte 25 && totalRow lt 27>
+                                <table border="1" style="margin-top:5px;width:100%;">
+                    <tr>
+                        <td width="20%"><span style="font-size:12px;"><strong><u>Date:</u>&nbsp;</strong>${record.trandate}</span></td>
+                       <#if record.pdfType ="masterandinvd" && record.isconsolidated = 'true' > <td width="60%" align="center"><strong><span style="font-size:18px;">
+                       MASTER BILL OF LADING #<#if record.mblNumber=''>${record.bolNumber}<#else>${record.mblNumber}</#if> </span></strong></td><#else><td width="60%" align="center"><strong><span style="font-size:18px;"> BILL OF LADING</span></strong></td></#if>
+                       <!-- <td width="20%"><span style="font-size:12px;">Page <#if record.pdfType ="standalone"><pagenumber/><#else>${record.pageNum}</#if> of:<u><#if record.pdfType ="standalone"><pagenumber/><#else>${record.totalPages}</#if><commented<pagenumber/></u></span></td>-->
+                          <#assign MastertotalRow=0>
+                        <#list record.shipperInfoArr as item>
+                          <#assign  MastertotalRow=MastertotalRow +1>
+                          </#list>
+        <td width="20%"><span style="font-size:12px;">Page 2 of:<u> 2</u></span></td>
+                    </tr>
+                </table>
+				</#if>
+                           
+                
+                         <!-- <span align="right" style="margine-right:90px;font-size:12px;font-family:Gill Sans Extrabold,sans-serif;">Page 2 of: 2</span>-->
+<!-- Code for adding page break of rows in Table is more than 9-->
+                      
+                         
+                  <table border="1" style="margin: 0px auto; margin-top:0px;width:100%;">
+                  
+                  
+                        <tr>
+                            <td border-left="1" border-top="1" colspan="17" style="padding: 0px; height: 1px; width: 216px; background-color: rgb(0, 0, 0); color:white;"><strong>&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;CARRIER INFORMATION </strong></td>
+                        </tr>
+                        <tr>
+
+                            <td border-left="1" border-top="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle;">&nbsp;<b>HANDLING</b>&nbsp;&nbsp;<b>UNIT</b></td>
+                            <td border-left="1" border-top="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle;">&nbsp; &nbsp;<b>PACKAGE</b></td>
+                            <td border-left="1" border-top="1" colspan="2" rowspan="3" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle;">&nbsp; &nbsp; &nbsp; &nbsp;<b> WEIGHT</b></td>
+                            <td border-left="1" border-top="1" colspan="1" rowspan="3" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; ">&nbsp; &nbsp;H.M.<br />&nbsp; &nbsp; &nbsp;<b>(X)</b></td>
+                            <td border-left="1" border-top="1" colspan="8" rowspan="3" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle;">&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;<strong><b>COMMODITY DESCRIPTION</b></strong><br /><span style="font-size:8px; "><b>Commodities requiring special or additional care or attention in handling or stowing must be so marked and packages as to ensure safe transportation with ordinary care. See Section 2(e) of NMFC Item 360</b></span></td>
+
+                            <td border-left="1" colspan="2" rowspan="1" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; ">&nbsp;&nbsp;<b>LTL ONLY</b></td>
+
+                        </tr>
+                        <tr>
+                            <td border-left="1" border-top="1" colspan="1" rowspan="2" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>QTY</b></td>
+                            <td border-left="1" border-top="1" colspan="1" rowspan="2" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>TYPE</b></td>
+                            <td border-left="1" border-top="1" colspan="1" rowspan="2" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>QTY</b></td>
+                            <td border-left="1" border-top="1" colspan="1" rowspan="2" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>TYPE</b></td>
+                            <td border-left="1" border-top="1" colspan="1" rowspan="2" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>NMFC#</b></td>
+                            <td border-left="1" border-top="1" colspan="1" rowspan="2" style="padding: 0px; height: 1px; width: 216px; vertical-align: middle; align: center"><b>CLASS</b></td>
+
+                        </tr>
+                </table>
+               
+					
+                    <table style="margin-top:0px;width:100%;">
+                        <!-- start items -->
+                     
+                            <tr>
+                                <td border-bottom="1" border-left="1" border-top="1" colspan="1" line-height="150%" style="white-space: nowrap; text-align: left;">${record.pallet!0}</td>
+                                <td border-bottom="1" border-left="1" border-top="1" colspan="1" line-height="150%" style="white-space: nowrap; text-align: left;">Pallets</td>
+                         <td border-bottom="1" border-left="1" border-top="1" colspan="1" line-height="150%" style="white-space: nowrap; text-align: left;">${record.totalPkgCount}</td>
+
+                                <td border-bottom="1" border-left="1" border-top="1" colspan="1" line-height="150%" style="white-space: nowrap; text-align: left;">Cases</td>
+                              <!--  <td border-bottom="1" border-left="1" border-top="1" colspan="2" line-height="150%" style="white-space: nowrap; text-align: left;">${item.custpage_subitem_weight}</td>-->
+                              <td border-bottom="1" border-left="1" border-top="1" colspan="2" line-height="150%" style="white-space: nowrap; text-align: left;">${record.totalWeight}</td>
+                                <td border-bottom="1" border-left="1" border-top="1" colspan="1" line-height="150%" style="white-space: nowrap; text-align: left;">HM</td>
+                                <td border-bottom="1" border-left="1" border-right="1" border-top="1" colspan="8" line-height="150%" style="text-align: left;">&nbsp; &nbsp; &nbsp; &nbsp; &nbsp;&nbsp; &nbsp;
+                                    <!--${item.custcol_freight_class}-->Baby Products
+                                </td>
+                                <td border-bottom="1" border-left="1" border-top="1" colspan="1" line-height="150%" style="white-space: nowrap; text-align: left;">${record.nmfc}</td>
+                                <td border-bottom="1" border-left="1" border-right="1" border-top="1" colspan="1" line-height="150%" style="white-space: nowrap; text-align: left;">${record.bclass}</td>
+
+                              </tr>
+                       
+
+                        
+
+
+                    </table>
+
+              
+                <table style="margin-top:0px;width:100%;">
+
+                    <tr>
+                        <td border-bottom="1" border-left="1" border-top="1" colspan="1" line-height="150%" style="white-space: nowrap; text-align: left;">&nbsp;</td>
+                        <td border-bottom="1" border-left="1" border-top="1" colspan="1" line-height="150%" style="white-space: nowrap; text-align: left;">&nbsp;</td>
+                        <td border-bottom="1" border-left="1" border-top="1" colspan="1" line-height="150%" style="white-space: nowrap; text-align: left;">&nbsp;</td>
+                        <td border-bottom="1" border-left="1" border-top="1" colspan="1" line-height="150%" style="white-space: nowrap; text-align: left;">&nbsp;</td>
+                        <td border-bottom="1" border-left="1" border-top="1" colspan="2" line-height="150%" style="white-space: nowrap; text-align: left;">&nbsp;</td>
+                        <td border-bottom="1" border-left="1" border-top="1" colspan="1" line-height="150%" style="white-space: nowrap; text-align: left;">&nbsp;</td>
+                        <td border-bottom="1" border-left="1" border-right="1" border-top="1" colspan="8" line-height="150%" style="text-align: left;">&nbsp;</td>
+                        <td border-bottom="1" border-left="1" border-top="1" colspan="1" line-height="150%" style="white-space: nowrap; text-align: left;">&nbsp;</td>
+                        <td border-bottom="1" border-left="1" border-right="1" border-top="1" colspan="1" line-height="150%" style="white-space: nowrap; text-align: left;">&nbsp;</td>
+
+                    </tr>
+                </table>
+                <table style="margin-top:0px;width:100%;">
+
+                    <tr>
+                        <td border-bottom="1" border-left="1" border-top="1" colspan="1" line-height="150%" style="white-space: nowrap; text-align: left;">&nbsp;</td>
+                        <td border-bottom="1" border-left="1" border-top="1" colspan="1" line-height="150%" style="white-space: nowrap; text-align: left;">&nbsp;</td>
+                        <td border-bottom="1" border-left="1" border-top="1" colspan="1" line-height="150%" style="white-space: nowrap; text-align: left;">&nbsp;</td>
+                        <td border-bottom="1" border-left="1" border-top="1" colspan="1" line-height="150%" style="white-space: nowrap; text-align: left;">&nbsp;</td>
+                        <td border-bottom="1" border-left="1" border-top="1" colspan="2" line-height="150%" style="white-space: nowrap; text-align: left;">&nbsp;</td>
+                        <td border-bottom="1" border-left="1" border-top="1" colspan="1" line-height="150%" style="white-space: nowrap; text-align: left;">&nbsp;</td>
+                        <td border-bottom="1" border-left="1" border-right="1" border-top="1" colspan="8" line-height="150%" style="text-align: left;">&nbsp;</td>
+                        <td border-bottom="1" border-left="1" border-top="1" colspan="1" line-height="150%" style="white-space: nowrap; text-align: left;">&nbsp;</td>
+                        <td border-bottom="1" border-left="1" border-right="1" border-top="1" colspan="1" line-height="150%" style="white-space: nowrap; text-align: left;">&nbsp;</td>
+
+                    </tr>
+                </table>
+                <table style="margin-top:0px;width:100%;">
+
+                    <tr>
+                        <td border-bottom="1" border-left="1" border-top="1" colspan="1" line-height="150%" style="white-space: nowrap; text-align: left;">&nbsp;</td>
+                        <td border-bottom="1" border-left="1" border-top="1" colspan="1" line-height="150%" style="white-space: nowrap; text-align: left;">&nbsp;</td>
+                        <td border-bottom="1" border-left="1" border-top="1" colspan="1" line-height="150%" style="white-space: nowrap; text-align: left;">&nbsp;</td>
+                        <td border-bottom="1" border-left="1" border-top="1" colspan="1" line-height="150%" style="white-space: nowrap; text-align: left;">&nbsp;</td>
+                        <td border-bottom="1" border-left="1" border-top="1" colspan="2" line-height="150%" style="white-space: nowrap; text-align: left;">&nbsp;</td>
+                        <td border-bottom="1" border-left="1" border-top="1" colspan="1" line-height="150%" style="white-space: nowrap; text-align: left;">&nbsp;</td>
+                        <td border-bottom="1" border-left="1" border-right="1" border-top="1" colspan="8" line-height="150%" style="text-align: left;">&nbsp;</td>
+                        <td border-bottom="1" border-left="1" border-top="1" colspan="1" line-height="150%" style="white-space: nowrap; text-align: left;">&nbsp;</td>
+                        <td border-bottom="1" border-left="1" border-right="1" border-top="1" colspan="1" line-height="150%" style="white-space: nowrap; text-align: left;">&nbsp;</td>
+
+                    </tr>
+                </table>
+                <table style="margin-top:0px;width:100%;">
+
+                    <tr>
+                        <td border-bottom="1" border-left="1" border-top="1" colspan="1" line-height="150%" style="white-space: nowrap; text-align: left;">&nbsp;</td>
+                        <td border-bottom="1" border-left="1" border-top="1" colspan="1" line-height="150%" style="white-space: nowrap; text-align: left;">&nbsp;</td>
+                        <td border-bottom="1" border-left="1" border-top="1" colspan="1" line-height="150%" style="white-space: nowrap; text-align: left;">&nbsp;</td>
+                        <td border-bottom="1" border-left="1" border-top="1" colspan="1" line-height="150%" style="white-space: nowrap; text-align: left;">&nbsp;</td>
+                        <td border-bottom="1" border-left="1" border-top="1" colspan="2" line-height="150%" style="white-space: nowrap; text-align: left;">&nbsp;</td>
+                        <td border-bottom="1" border-left="1" border-top="1" colspan="1" line-height="150%" style="white-space: nowrap; text-align: left;">&nbsp;</td>
+                        <td border-bottom="1" border-left="1" border-right="1" border-top="1" colspan="8" line-height="150%" style="text-align: center;"><b>&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;GRAND TOTAL</b></td>
+                        <td border-bottom="1" border-left="1" border-top="1" colspan="1" line-height="150%" style="white-space: nowrap; text-align: left;">&nbsp;</td>
+                        <td border-bottom="1" border-left="1" border-right="1" border-top="1" colspan="1" line-height="150%" style="white-space: nowrap; text-align: left;">&nbsp;</td>
+
+                    </tr>
+                </table>
+
+                <table border-left="1" border-right="1" style="width: 100%; margin-top: 0x;">
+                        <#if record.pdfType!="masterandinvd" >
+                          
+                    <tr>
+                        <td background-color="#ffffff" border-top="1" colspan="8"><span style="page-break-inside: avoid; font-size:9px;">Where the rate is dependent on value, shippers are required to state specifically in writing the agreed or declared value of the property as follows:<br /><br />&quot;The agreed or declared value of the property is specifically stated by the shipper to be not exceeding ______________ per ________________.&quot;</span></td>
+                        <td border-left="1" border-top="1" colspan="4" rowspan="1" style="font-weight: bold; color: rgb(51, 51, 51); text-align: left;">COD Amount: $ ________________<br /><br /> &nbsp; &nbsp; Fee Terms:&nbsp; &nbsp;Collect: ___ . Prepaid:&nbsp; ___<br />&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; Customer check acceptable: ___</td>
+                    </tr>
+                    <tr>
+                        <td background-color="#ffffff" border-top="1" colspan="12"><span style="font-size:9px;"><strong>NOTE Liability Limitation for loss or damage in this shipment may be applicable. See 49 U.S.C. &sect;14706(c)(1)(A) and (B).</strong></span></td>
+                    </tr>
+                    <tr>
+                        <td background-color="#ffffff" border-top="1" border-bottom="1" colspan="8"><span style="font-size:8px;">RECEIVED, subject to individually determined rates or contracts that have been agreed upon in writing between the carrier and shipper, if applicable, otherwise to the rates, classifications and rules that have been established by the carrier and are available to the shipper on request, and to the terms and conditions set forth on the reverse side hereon as well as to all applicable state and federal regulations.</span></td>
+                        <td border-left="1" border-top="1" colspan="4" border-bottom="1" rowspan="1" style="font-weight: bold; color: rgb(51, 51, 51); text-align: left;"><span style="font-size:8px;">The carrier shall not make delivery of this shipment without payment of freight and all other lawful charges.<br /><br />______________________________________<br />Shipper Signature</span></td>
+                    </tr>
+                          </#if>
+                    <tr>
+                        <td background-color="#ffffff" border-bottom="1" border-top="1" colspan="4" rowspan="1"><strong>SHIPPER SIGNATURE / DATE</strong><br /><span style="font-size:8px;">This is to certify that the above named materials are properly classified, packaged, marked and labeled, and are in proper condition for transportation according to the applicable regulations of the DOT.</span><br
+                            /><br /><br /><br />&nbsp;</td>
+                        <td background-color="#ffffff" border-bottom="1" border-left="1" border-top="1" colspan="3" rowspan="1" style="vertical-align: top;"><span style="font-size:8px;"><strong>Trailer Loaded:&nbsp; &nbsp; &nbsp;Freight Counted:&nbsp;</strong><br /><br />_<u>X_</u> By Shipper&nbsp; &nbsp; &nbsp; &nbsp;___By Shipper<br /><br />___ By Drive&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; ___ By Driver/pallets&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;said to contain</span><br
+                            /><br />&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;&nbsp;<span style="font-size:9px;"><u>X</u>&nbsp;By Driver/Pieces</span><br />&nbsp;</td>
+                        <td background-color="#ffffff" border-bottom="1" border-left="1" border-top="1" colspan="5" rowspan="1" style="vertical-align: top; font-size:8px;"><strong>CARRIER SIGNATURE / PICKUP DATE</strong><br />Carrier acknowledges receipt of packages and required placards.&nbsp; Carrier certifies emergency response information was made available and/or carrier has the DOT emergency
+                            response guidebook or equivalent documentation in the vehicle.<br /><br /><em>Property described above is received in apparent good order, except as noted.</em></td>
+                    </tr>
+                          
+                </table>
+
+                <!--End BOL-->
+            </body>
+        </#list>
+    </#if>
+</pdf>
+
