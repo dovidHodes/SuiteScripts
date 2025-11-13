@@ -12,6 +12,7 @@ define([
   'N/log'
 ], function (search, render, record, log) {
   
+  
   /**
    * Main function to generate and attach BOL PDF to Item Fulfillment
    * @param {string} ifId - Item Fulfillment internal ID
@@ -86,7 +87,26 @@ define([
       // Use transaction ID from earlier load for file name in log
       log.audit('Generate BOL', 'PDF generated and attached successfully. File ID: ' + fileId + ', File Name: BOL_' + tranId + '.pdf');
       
-      // Step 5: Update IF fields
+      // Step 5: Add time tracker line for BOL creation
+      // Action ID 6 = "Create BOL" (6th action in the list)
+      try {
+        var customerId = ifRecord.getValue('entity');
+        if (customerId) {
+          addTimeTrackerLine({
+            actionId: 6, // Create BOL action ID
+            customerId: customerId,
+            timeSaved: 60, // 60 seconds
+            employeeId: 5
+          });
+        } else {
+          log.audit('Time Tracker', 'Skipping time tracker - no customer ID found on IF');
+        }
+      } catch (timeTrackerError) {
+        // Log error but don't fail the BOL generation
+        log.error('Time Tracker Error', 'Failed to add time tracker line: ' + timeTrackerError.toString());
+      }
+      
+      // Step 6: Update IF fields
       updateIFFields(ifId, jsonData);
       
       return {
@@ -508,6 +528,95 @@ define([
     var day = date.getDate();
     var year = date.getFullYear();
     return month + '/' + day + '/' + year;
+  }
+  
+  /**
+   * Add a time tracking line to the custom transaction
+   * @param {Object} options
+   * @param {number} options.actionId - Internal ID of the action (custcol_action)
+   * @param {number} options.customerId - Internal ID of the customer (custcol_trading_partner)
+   * @param {number} options.timeSaved - Time saved in seconds (custcol_time_saved)
+   * @param {number} [options.employeeId=5] - Employee ID (custcol_employee), defaults to 5
+   * @returns {string} Record ID of the time tracker transaction
+   */
+  function addTimeTrackerLine(options) {
+    try {
+      // Load the existing time tracker transaction
+      var timeTrackerRecord = record.load({
+        type: 'customtransaction_time_tracker',
+        id: 15829943,
+        isDynamic: true
+      });
+      
+      // Get the current line count
+      var lineCount = timeTrackerRecord.getLineCount({
+        sublistId: 'line'
+      });
+      
+      // Insert a new line at the end of the sublist
+      timeTrackerRecord.insertLine({
+        sublistId: 'line',
+        line: lineCount // Inserts at the end (0-indexed)
+      });
+      
+      // Select the newly inserted line
+      timeTrackerRecord.selectLine({
+        sublistId: 'line',
+        line: lineCount
+      });
+      
+      // Set values for fields on the newly inserted line
+      timeTrackerRecord.setCurrentSublistValue({
+        sublistId: 'line',
+        fieldId: 'account',
+        value: 619
+      });
+      
+      timeTrackerRecord.setCurrentSublistValue({
+        sublistId: 'line',
+        fieldId: 'amount',
+        value: 0
+      });
+      
+      timeTrackerRecord.setCurrentSublistValue({
+        sublistId: 'line',
+        fieldId: 'custcol_action',
+        value: options.actionId
+      });
+      
+      timeTrackerRecord.setCurrentSublistValue({
+        sublistId: 'line',
+        fieldId: 'custcol_trading_partner',
+        value: options.customerId
+      });
+      
+      timeTrackerRecord.setCurrentSublistValue({
+        sublistId: 'line',
+        fieldId: 'custcol_employee',
+        value: options.employeeId || 5
+      });
+      
+      timeTrackerRecord.setCurrentSublistValue({
+        sublistId: 'line',
+        fieldId: 'custcol_time_saved',
+        value: options.timeSaved
+      });
+      
+      // Commit the line
+      timeTrackerRecord.commitLine({
+        sublistId: 'line'
+      });
+      
+      // Save the record
+      var recordId = timeTrackerRecord.save();
+      
+      log.audit('Time Tracker', 'Added line to time tracker record: ' + recordId + ' for customer: ' + options.customerId + ', time saved: ' + options.timeSaved + ' seconds');
+      
+      return recordId;
+    } catch (e) {
+      log.error('Time Tracker Error', 'Failed to add time tracker line: ' + e.toString());
+      throw e;
+    }
   }
   
   return {
