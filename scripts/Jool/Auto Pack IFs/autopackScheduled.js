@@ -8,8 +8,6 @@
  * - custbody_requested_autopack = false
  * - Entity has custentity_auto_create_packages = true
  * - Created date after November 1, 2025
- * - If entity has custentity_needs_routing = true, then custbody_routing_status must be 3
- *   Otherwise, routing status is not required
  * 
  * Sets custbody_requested_autopack = true only after MR task is successfully submitted (not failed).
  */
@@ -25,8 +23,6 @@ define(['N/search', 'N/log', 'N/record', 'N/task', 'N/runtime'], function (searc
         log.audit('execute', 'Starting scheduled script to schedule SPS autopack');
         
         // First, search for entities where custentity_auto_create_packages = true
-        // Also get custentity_needs_routing to determine routing status requirement
-        var entityMap = {}; // Map of entityId -> {needsRouting: true/false}
         var entityIds = [];
         try {
             log.debug('execute', 'Step 1: Searching for entities with custentity_auto_create_packages = true');
@@ -38,9 +34,6 @@ define(['N/search', 'N/log', 'N/record', 'N/task', 'N/runtime'], function (searc
                 columns: [
                     search.createColumn({
                         name: 'internalid'
-                    }),
-                    search.createColumn({
-                        name: 'custentity_needs_routing'
                     })
                 ]
             });
@@ -48,10 +41,7 @@ define(['N/search', 'N/log', 'N/record', 'N/task', 'N/runtime'], function (searc
             var entitySearchResults = entitySearch.run();
             entitySearchResults.each(function(result) {
                 var entityId = result.id;
-                var needsRouting = result.getValue('custentity_needs_routing') === 'T';
                 entityIds.push(entityId);
-                entityMap[entityId] = { needsRouting: needsRouting };
-                log.debug('execute', 'Entity ' + entityId + ' - needs_routing: ' + needsRouting);
                 return true;
             });
             
@@ -66,9 +56,7 @@ define(['N/search', 'N/log', 'N/record', 'N/task', 'N/runtime'], function (searc
             return;
         }
         
-        // Build search filters - routing status is conditional based on entity needs_routing flag
-        // We'll search for IFs with requested_autopack = false and entity in our list
-        // Then filter by routing status in the processing loop based on entity needs_routing
+        // Build search filters - search for IFs with requested_autopack = false and entity in our list
         // Only process IFs created after November 1, 2025
         log.debug('execute', 'Step 2: Creating IF search with ' + entityIds.length + ' entity/ies');
         // Use string date format for NetSuite search: MM/DD/YYYY
@@ -78,6 +66,8 @@ define(['N/search', 'N/log', 'N/record', 'N/task', 'N/runtime'], function (searc
         var ifSearch = search.create({
             type: search.Type.ITEM_FULFILLMENT,
             filters: [
+                ['mainline', 'is', 'T'],  // Only get header records, not line items
+                'AND',
                 ['custbody_requested_autopack', 'is', 'F'],
                 'AND',
                 ['entity', 'anyof', entityIds],
@@ -93,9 +83,6 @@ define(['N/search', 'N/log', 'N/record', 'N/task', 'N/runtime'], function (searc
                 }),
                 search.createColumn({
                     name: 'entity'
-                }),
-                search.createColumn({
-                    name: 'custbody_routing_status'
                 })
             ]
         });
@@ -141,60 +128,52 @@ define(['N/search', 'N/log', 'N/record', 'N/task', 'N/runtime'], function (searc
                         
                         log.debug('execute', 'Processing IF: ' + tranId + ' (ID: ' + ifId + '), Entity: ' + entityId);
                         
-                        // Get entity info to check routing requirement
-                        var entityInfo = entityMap[entityId];
-                        if (!entityInfo) {
-                            log.debug('execute', 'IF ' + tranId + ' (ID: ' + ifId + ') entity ' + entityId + ' not in map, skipping');
-                            return; // Skip this iteration
-                        }
-                        
-                        log.debug('execute', 'IF ' + tranId + ' - Entity needs_routing: ' + entityInfo.needsRouting);
-                        
-                        // Get routing status from search result
-                        var routingStatus = result.getValue('custbody_routing_status');
-                        var requestedAutopack = result.getValue('custbody_requested_autopack');
-                        
-                        log.debug('execute', 'IF ' + tranId + ' - Routing status: ' + routingStatus + ', Requested autopack: ' + requestedAutopack);
-                        
-                        // Check routing status requirement based on entity needs_routing flag
-                        var routingStatusValid = true;
-                        if (entityInfo.needsRouting) {
-                            // Entity requires routing, so routing status must be 3
-                            routingStatusValid = (routingStatus === '3' || routingStatus === 3);
-                            log.debug('execute', 'IF ' + tranId + ' - Entity requires routing, status check: ' + routingStatusValid + ' (status=' + routingStatus + ')');
-                            if (!routingStatusValid) {
-                                log.debug('execute', 'IF ' + tranId + ' (ID: ' + ifId + ') entity requires routing but status is ' + routingStatus + ', skipping');
-                            }
-                        } else {
-                            // Entity doesn't require routing, so routing status doesn't matter
-                            routingStatusValid = true;
-                            log.debug('execute', 'IF ' + tranId + ' - Entity does not require routing, status check passed');
-                        }
-                        
-                        if (routingStatusValid && requestedAutopack !== 'T') {
-                            // Mark this IF as processed to prevent duplicates
-                            processedIFIds[ifIdStr] = true;
-                            
-                            // Add to batch for scheduling (will set field after successful task submission)
-                            ifIdsToSchedule.push({
-                                ifId: ifId,
-                                tranId: tranId,
-                                entityId: entityId
+                        // Double-check requested_autopack field by loading the record
+                        // This prevents processing IFs that were just set to true by another concurrent execution
+                        var requestedAutopack = false;
+                        try {
+                            var ifRecordCheck = record.load({
+                                type: record.Type.ITEM_FULFILLMENT,
+                                id: ifId,
+                                isDynamic: false
                             });
-                            processedCount++;
-                            
-                            log.debug('execute', 'IF ' + tranId + ' (ID: ' + ifId + ') meets criteria, queued for scheduling. Queue size: ' + ifIdsToSchedule.length);
-                            
-                            // Schedule MR script when batch is full or at end
-                            if (ifIdsToSchedule.length >= batchSize) {
-                                log.debug('execute', 'Batch size reached (' + batchSize + '), scheduling MR tasks');
-                                var scheduled = scheduleSpsMrAutopack(ifIdsToSchedule);
-                                scheduledCount += scheduled;
-                                log.debug('execute', 'Scheduled ' + scheduled + ' MR task(s) from batch. Total scheduled so far: ' + scheduledCount);
-                                ifIdsToSchedule = [];
-                            }
-                        } else {
-                            log.debug('execute', 'IF ' + tranId + ' (ID: ' + ifId + ') does not meet criteria. routingStatusValid: ' + routingStatusValid + ', requestedAutopack: ' + requestedAutopack);
+                            requestedAutopack = ifRecordCheck.getValue('custbody_requested_autopack');
+                            log.debug('execute', 'IF ' + tranId + ' - Requested autopack (from record): ' + requestedAutopack);
+                        } catch (e) {
+                            log.error('execute', 'Error loading IF ' + tranId + ' to check requested_autopack: ' + e.toString());
+                            // If we can't load it, skip to be safe
+                            return;
+                        }
+                        
+                        // Skip if already requested (might have been set by concurrent execution)
+                        if (requestedAutopack === true || requestedAutopack === 'T') {
+                            log.debug('execute', 'IF ' + tranId + ' (ID: ' + ifId + ') already has requested_autopack = true, skipping');
+                            // Mark as processed so we don't check it again in this execution
+                            processedIFIds[ifIdStr] = true;
+                            return;
+                        }
+                        
+                        // Process IF (requestedAutopack is false)
+                        // Mark this IF as processed to prevent duplicates
+                        processedIFIds[ifIdStr] = true;
+                        
+                        // Add to batch for scheduling (will set field after successful task submission)
+                        ifIdsToSchedule.push({
+                            ifId: ifId,
+                            tranId: tranId,
+                            entityId: entityId
+                        });
+                        processedCount++;
+                        
+                        log.debug('execute', 'IF ' + tranId + ' (ID: ' + ifId + ') meets criteria, queued for scheduling. Queue size: ' + ifIdsToSchedule.length);
+                        
+                        // Schedule MR script when batch is full or at end
+                        if (ifIdsToSchedule.length >= batchSize) {
+                            log.debug('execute', 'Batch size reached (' + batchSize + '), scheduling MR tasks');
+                            var scheduled = scheduleSpsMrAutopack(ifIdsToSchedule);
+                            scheduledCount += scheduled;
+                            log.debug('execute', 'Scheduled ' + scheduled + ' MR task(s) from batch. Total scheduled so far: ' + scheduledCount);
+                            ifIdsToSchedule = [];
                         }
                     } catch (e) {
                         log.error('execute', 'Error processing IF ' + tranId + ' (ID: ' + ifId + '): ' + e.toString());
@@ -294,70 +273,71 @@ define(['N/search', 'N/log', 'N/record', 'N/task', 'N/runtime'], function (searc
                 log.debug('scheduleSpsMrAutopack', 'JSON parameter for IF ' + tranId + ': ' + jsonParam);
                 
                 var mrScriptId = 'customscript_sps_mr_auto_pack_2x';
-                var mrDeployId = 'customdeploy_sps_mr_auto_pack_2x_9';
+                // List of all available deployments to try
+                var mrDeployIds = [
+                    'customdeploy_sps_mr_auto_pack_2x_0',
+                    'customdeploy_sps_mr_auto_pack_2x_1',
+                    'customdeploy_sps_mr_auto_pack_2x_2',
+                    'customdeploy_sps_mr_auto_pack_2x_3',
+                    'customdeploy_sps_mr_auto_pack_2x_4',
+                    'customdeploy_sps_mr_auto_pack_2x_5',
+                    'customdeploy_sps_mr_auto_pack_2x_6',
+                    'customdeploy_sps_mr_auto_pack_2x_7',
+                    'customdeploy_sps_mr_auto_pack_2x_8',
+                    'customdeploy_sps_mr_auto_pack_2x_9',
+                    'customdeploy_sps_mr_auto_pack_2x_10'
+                ];
                 
-                log.debug('scheduleSpsMrAutopack', 'Creating MR task for IF ' + tranId + ' with script: ' + mrScriptId + ', deploy: ' + mrDeployId);
-                
-                // Create the MapReduce task - ONE per IF
-                var mrTask = task.create({
-                    taskType: task.TaskType.MAP_REDUCE,
-                    scriptId: mrScriptId,
-                    deploymentId: mrDeployId,
-                    params: {
-                        custscript_sps_mr_autopack_json: jsonParam
-                    }
-                });
-                
-                log.debug('scheduleSpsMrAutopack', 'Submitting MR task for IF ' + tranId);
+                // Try each deployment until one succeeds
                 var taskId = null;
-                var submissionAttempts = 0;
-                var maxRetries = 2;
-                var retryDelay = 2000; // 2 seconds delay between retries
+                var deploymentTried = 0;
+                var allDeploymentsBusy = true;
                 
-                // Try to submit with retry logic for MAP_REDUCE_ALREADY_RUNNING errors
-                while (submissionAttempts <= maxRetries && taskId === null) {
+                for (var d = 0; d < mrDeployIds.length && taskId === null; d++) {
+                    var mrDeployId = mrDeployIds[d];
+                    deploymentTried++;
+                    
                     try {
+                        log.debug('scheduleSpsMrAutopack', 'Trying deployment ' + mrDeployId + ' for IF ' + tranId + ' (attempt ' + deploymentTried + ' of ' + mrDeployIds.length + ')');
+                        
+                        var mrTask = task.create({
+                            taskType: task.TaskType.MAP_REDUCE,
+                            scriptId: mrScriptId,
+                            deploymentId: mrDeployId,
+                            params: {
+                                custscript_sps_mr_autopack_json: jsonParam
+                            }
+                        });
+                        
                         taskId = mrTask.submit();
-                        log.debug('scheduleSpsMrAutopack', 'MR task submitted for IF ' + tranId + '. Task ID: ' + taskId);
-                        break; // Success, exit retry loop
+                        log.debug('scheduleSpsMrAutopack', 'MR task submitted for IF ' + tranId + ' using deployment ' + mrDeployId + '. Task ID: ' + taskId);
+                        allDeploymentsBusy = false;
+                        break; // Success, exit loop
+                        
                     } catch (submitError) {
-                        submissionAttempts++;
                         var errorName = submitError.name || '';
                         var errorMessage = submitError.message || submitError.toString();
                         
                         // Check if it's the MAP_REDUCE_ALREADY_RUNNING error
                         if (errorName === 'MAP_REDUCE_ALREADY_RUNNING' || errorMessage.indexOf('already running') >= 0) {
-                            if (submissionAttempts <= maxRetries) {
-                                log.debug('scheduleSpsMrAutopack', 'MR task already running for IF ' + tranId + '. Retry attempt ' + submissionAttempts + ' of ' + maxRetries + ' after ' + retryDelay + 'ms delay');
-                                // Wait before retrying (using a simple loop since we can't use setTimeout in scheduled scripts)
-                                var startTime = new Date().getTime();
-                                while (new Date().getTime() - startTime < retryDelay) {
-                                    // Busy wait - not ideal but necessary in scheduled scripts
-                                }
-                                // Recreate the task for retry
-                                mrTask = task.create({
-                                    taskType: task.TaskType.MAP_REDUCE,
-                                    scriptId: mrScriptId,
-                                    deploymentId: mrDeployId,
-                                    params: {
-                                        custscript_sps_mr_autopack_json: jsonParam
-                                    }
-                                });
-                            } else {
-                                // Max retries reached
-                                log.debug('scheduleSpsMrAutopack', 'MR task still running after ' + maxRetries + ' retries for IF ' + tranId + '. Will retry on next scheduled run.');
-                                throw submitError; // Re-throw to be caught by outer catch
-                            }
+                            log.debug('scheduleSpsMrAutopack', 'Deployment ' + mrDeployId + ' is busy for IF ' + tranId + ', trying next deployment');
+                            // Continue to next deployment
+                            continue;
                         } else {
-                            // Different error, don't retry
-                            throw submitError;
+                            // Different error - log and try next deployment
+                            log.debug('scheduleSpsMrAutopack', 'Error with deployment ' + mrDeployId + ' for IF ' + tranId + ': ' + errorMessage + '. Trying next deployment');
+                            continue;
                         }
                     }
                 }
                 
-                // If we still don't have a taskId, throw error
+                // If we tried all deployments and none worked
                 if (!taskId) {
-                    throw new Error('Failed to submit MR task after ' + maxRetries + ' retries');
+                    if (allDeploymentsBusy) {
+                        throw new Error('All MR deployments are busy. Tried ' + deploymentTried + ' deployment(s).');
+                    } else {
+                        throw new Error('Failed to submit MR task after trying ' + deploymentTried + ' deployment(s)');
+                    }
                 }
                 
                 // Check task status immediately after submission
@@ -406,12 +386,16 @@ define(['N/search', 'N/log', 'N/record', 'N/task', 'N/runtime'], function (searc
                 }
                 
             } catch (e) {
-                // Task submission failed - reset the field so it can be retried
+                // Task submission failed
                 errorCount++;
                 var errorName = e.name || '';
                 var errorMessage = e.message || e.toString();
+                var isAllDeploymentsBusy = errorMessage.indexOf('All MR deployments are busy') >= 0 || 
+                                          errorMessage.indexOf('already running') >= 0 ||
+                                          errorName === 'MAP_REDUCE_ALREADY_RUNNING';
                 
-                // Reset the field since task submission failed
+                // Reset the field so it can be retried on the next scheduled run
+                // This allows the scheduled script to keep trying until a deployment becomes available
                 try {
                     var ifRecordReset = record.load({
                         type: record.Type.ITEM_FULFILLMENT,
@@ -426,18 +410,22 @@ define(['N/search', 'N/log', 'N/record', 'N/task', 'N/runtime'], function (searc
                         enableSourcing: false,
                         ignoreMandatoryFields: true
                     });
-                    log.debug('scheduleSpsMrAutopack', 'Reset requested_autopack field for IF ' + tranId + ' due to submission failure - will retry on next run');
+                    
+                    if (isAllDeploymentsBusy) {
+                        log.debug('scheduleSpsMrAutopack', 'All MR deployments busy for IF ' + tranId + ' (ID: ' + ifId + '). Field reset - will retry on next scheduled run when capacity is available.');
+                    } else {
+                        log.debug('scheduleSpsMrAutopack', 'Reset requested_autopack field for IF ' + tranId + ' due to submission failure - will retry on next run');
+                    }
                 } catch (resetError) {
                     log.error('scheduleSpsMrAutopack', 'Error resetting field for IF ' + tranId + ' after submission failure: ' + resetError.toString());
                 }
                 
-                if (errorName === 'MAP_REDUCE_ALREADY_RUNNING' || errorMessage.indexOf('already running') >= 0) {
-                    log.debug('scheduleSpsMrAutopack', 'MR script already running for IF ' + tranId + ' (ID: ' + ifId + '). Field reset - will retry on next scheduled run.');
+                if (isAllDeploymentsBusy) {
+                    log.debug('scheduleSpsMrAutopack', 'All MR deployments are busy for IF ' + tranId + ' (ID: ' + ifId + '). Will retry on next scheduled run when a deployment becomes available.');
                 } else {
                     log.error('scheduleSpsMrAutopack', 'Error scheduling MR script for IF ' + tranId + ' (ID: ' + ifId + '): ' + e.toString());
                     log.error('scheduleSpsMrAutopack', 'Stack trace: ' + (e.stack || 'N/A'));
                 }
-                log.error('scheduleSpsMrAutopack', 'Field reset - IF can be retried on next run');
             }
         });
         

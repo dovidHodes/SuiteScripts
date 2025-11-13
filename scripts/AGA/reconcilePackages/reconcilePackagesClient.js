@@ -1,46 +1,81 @@
 /**
- * @NApiVersion 2.1
- * @NScriptType ClientScript
- * 
- * Client script placeholder for Reconcile Packages functionality
- * This script is called from the User Event script button
+ *@NApiVersion 2.1
+ *@NScriptType ClientScript
  */
-define(['N/record', 'N/ui/dialog'], (record, dialog) => {
-    
-    /**
-     * Function called by the "Reconcile Packages" button
-     * @param {string} recordId - The ID of the current record
-     * @param {string} recordType - The type of the current record
-     */
+define(['N/url', 'N/ui/message', 'N/log', 'N/currentRecord'], (url, message, log, currentRecord) => {
+
+    function pageInit(context) {
+        try { log.debug('ClientScript', 'Reconcile Packages Client Script loaded successfully.'); } catch (e) {}
+    }
+
     function callReconcilePackages(recordId, recordType) {
-        // TODO: Implement reconcile packages logic here
-        // Reference: https://6448561.app.netsuite.com/app/common/scripting/script.nl?id=2621&whence=
-        
         try {
-            // Placeholder logic - replace with actual implementation
-            dialog.alert({
-                title: 'Reconcile Packages',
-                message: 'Reconcile Packages functionality to be implemented.\nRecord ID: ' + recordId + '\nRecord Type: ' + recordType
+            var rec = currentRecord.get();
+            var type = recordType || (rec && rec.type);
+            if (!recordId || !type) {
+                alert('Record not available.');
+                return;
+            }
+
+            var processingMsg = message.create({
+                title: 'Reconciling Packages',
+                message: 'Reconciling packages please wait...',
+                type: message.Type.INFORMATION
             });
-            
-            // Example: Load the record and perform operations
-            // const rec = record.load({
-            //     type: recordType,
-            //     id: recordId
-            // });
-            
-            // Add your reconcile packages logic here
-            
-        } catch (error) {
-            dialog.alert({
-                title: 'Error',
-                message: 'An error occurred: ' + error.message
+            try { processingMsg.show(); } catch (e) {}
+
+            var u = url.resolveScript({
+                scriptId: 'customscript_reconcile_packages_suitelet',
+                deploymentId: 'customdeploy_reconcile_packages_suitelet',
+                returnExternalUrl: false,
+                params: { recordId: String(recordId), recordType: String(type) }
             });
+
+            // Use XHR when available; fallback to navigation with redirect
+            try {
+                if (window.fetch) {
+                    fetch(u, { method: 'GET', credentials: 'same-origin' })
+                        .then(function(res) { return res.text().then(function(text){ return { ok: res.ok, text: text }; }); })
+                        .then(function(result) {
+                            try { processingMsg.hide(); } catch (_) {}
+                            if (result.ok && result.text && !result.text.includes('Error')) {
+                                var successMsg = message.create({
+                                    title: 'Success',
+                                    message: result.text || 'Packages reconciled successfully.',
+                                    type: message.Type.CONFIRMATION
+                                });
+                                try { successMsg.show(); } catch (_) {}
+                                location.reload();
+                            } else {
+                                var errMsg = message.create({
+                                    title: 'Reconciliation Failed',
+                                    message: result.text || 'Failed to reconcile packages.',
+                                    type: message.Type.ERROR
+                                });
+                                try { errMsg.show(); } catch (_) {}
+                            }
+                        })
+                        .catch(function(err){
+                            try { processingMsg.hide(); } catch (_) {}
+                            var errMsg = message.create({
+                                title: 'Reconciliation Failed',
+                                message: 'An error occurred while reconciling packages.',
+                                type: message.Type.ERROR
+                            });
+                            try { errMsg.show(); } catch (_) {}
+                        });
+                } else {
+                    window.location = u + '&redirect=T';
+                }
+            } catch (_) {
+                window.location = u + '&redirect=T';
+            }
+        } catch (e) {
+            try { log.error('callReconcilePackages Error', e); } catch (_) {}
+            alert('Error occurred: ' + (e && e.message ? e.message : 'Unable to reconcile packages.'));
         }
     }
 
-    return {
-        callReconcilePackages: callReconcilePackages
-    };
+    return { pageInit: pageInit, callReconcilePackages: callReconcilePackages };
 });
 

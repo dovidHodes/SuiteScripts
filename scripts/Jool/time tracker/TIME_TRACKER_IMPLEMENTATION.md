@@ -21,6 +21,7 @@ When adding a line to the custom transaction, the following fields must be popul
 | `custcol_trading_partner` | Internal ID | Customer ID for whom the action is being run |
 | `custcol_employee` | `5` | Employee who saved time (currently hardcoded to internal ID 5) |
 | `custcol_time_saved` | Integer (seconds) | Time saved in seconds, passed as integer |
+| `custcol_date_time` | Date/Time | **REQUIRED** - Current date/time when line is added (use `new Date()`) |
 
 ## Action List (custcol_action Values)
 
@@ -48,7 +49,44 @@ Based on the workflow, the following actions need to be tracked. Each action has
 - **custcol_time_saved:** Should be calculated or passed as the number of seconds saved by automating this action
 - **custcol_employee:** Currently hardcoded to internal ID `5`, but may need to be dynamic in the future
 
-### Example Implementation Pattern
+## Recommended: Use Library Function
+
+**For all new projects, use the library function** located at:
+- `scripts/Jool/time tracker/_dsh_lib_time_tracker.js`
+
+See `USAGE_PATTERN.md` for details on how to use the library function. The library automatically handles datetime tracking (`custcol_date_time`).
+
+### Example: Using Library Function (Recommended)
+
+```javascript
+// Import the library
+// IMPORTANT: Use './_dsh_lib_time_tracker' when library is in same folder in NetSuite File Cabinet
+define([
+  'N/record',
+  'N/log',
+  './_dsh_lib_time_tracker'  // Same folder pattern - library must be in same File Cabinet folder
+], function (record, log, timeTrackerLib) {
+  
+  // After completing an action
+  try {
+    var customerId = record.getValue('entity');
+    if (customerId) {
+      timeTrackerLib.addTimeTrackerLine({
+        actionId: 6,        // Create BOL
+        customerId: customerId,
+        timeSaved: 60,      // seconds
+        employeeId: 5
+      });
+    }
+  } catch (e) {
+    log.error('Time Tracker Error', e);
+  }
+});
+```
+
+### Manual Implementation Pattern (Legacy)
+
+If you cannot use the library function, use this pattern:
 
 ```javascript
 /**
@@ -111,6 +149,15 @@ function addTimeTrackerLine(options) {
             fieldId: 'custcol_time_saved',
             line: lineId,
             value: options.timeSaved
+        });
+        
+        // Set datetime when line was added (current date/time)
+        var currentDateTime = new Date();
+        timeTrackerRecord.setSublistValue({
+            sublistId: 'line',
+            fieldId: 'custcol_date_time',
+            line: lineId,
+            value: currentDateTime
         });
         
         var recordId = timeTrackerRecord.save();

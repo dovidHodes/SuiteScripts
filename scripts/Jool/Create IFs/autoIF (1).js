@@ -10,7 +10,13 @@
  * - Sales order has custbody_ifs_created = false
  */
 
-define(['N/search', 'N/log', 'N/record', 'N/error'], function (search, log, record, error) {
+define([
+    'N/search', 
+    'N/log', 
+    'N/record', 
+    'N/error',
+    './_dsh_lib_time_tracker'  // Time tracker library - same folder in SuiteScripts
+], function (search, log, record, error, timeTrackerLib) {
     
 
     function getInputData(inputContext) {
@@ -499,6 +505,61 @@ define(['N/search', 'N/log', 'N/record', 'N/error'], function (search, log, reco
             
             log.audit('createItemFulfillment', 'Successfully created IF ' + ifTranId + ' for location ' + locationId + ' on SO ' + soTranIdValue);
             
+            // Add time tracker lines for IF creation
+            // Action ID 2 = "Create Item fulfillment" (2nd action in the list)
+            // Action ID 3 = "Request Routing" (3rd action in the list)
+            // Action ID 4 = "Populate routing" (4th action in the list)
+            try {
+                if (entityId) {
+                    // First time tracker line - Create IF (Employee 5)
+                    try {
+                        log.debug('Time Tracker - Create IF', 'Adding time tracker line for IF: ' + ifTranId + ', Customer: ' + entityId + ', Action: Create IF');
+                        timeTrackerLib.addTimeTrackerLine({
+                            actionId: 2, // Create Item fulfillment action ID
+                            customerId: entityId,
+                            timeSaved: 30, // 30 seconds
+                            employeeId: 5
+                        });
+                        log.debug('Time Tracker - Create IF', 'Successfully added time tracker line for employee 5, action 2');
+                    } catch (timeTrackerError1) {
+                        log.error('Time Tracker Error - Create IF', 'Failed to add time tracker line for employee 5: ' + timeTrackerError1.toString());
+                    }
+                    
+                    // Second time tracker line - Request Routing (Employee 5)
+                    try {
+                        log.debug('Time Tracker - Request Routing', 'Adding time tracker line for IF: ' + ifTranId + ', Customer: ' + entityId + ', Action: Request Routing');
+                        timeTrackerLib.addTimeTrackerLine({
+                            actionId: 3, // Request Routing action ID
+                            customerId: entityId,
+                            timeSaved: 5, // 5 seconds
+                            employeeId: 5
+                        });
+                        log.debug('Time Tracker - Request Routing', 'Successfully added time tracker line for employee 5, action 3');
+                    } catch (timeTrackerError2) {
+                        log.error('Time Tracker Error - Request Routing', 'Failed to add time tracker line for employee 5: ' + timeTrackerError2.toString());
+                    }
+                    
+                    // Third time tracker line - Populate routing back (Employee 5)
+                    try {
+                        log.debug('Time Tracker - Populate Routing Back', 'Adding time tracker line for IF: ' + ifTranId + ', Customer: ' + entityId + ', Action: Populate routing');
+                        timeTrackerLib.addTimeTrackerLine({
+                            actionId: 4, // Populate routing action ID
+                            customerId: entityId,
+                            timeSaved: 5, // 5 seconds
+                            employeeId: 5
+                        });
+                        log.debug('Time Tracker - Populate Routing Back', 'Successfully added time tracker line for employee 5, action 4');
+                    } catch (timeTrackerError3) {
+                        log.error('Time Tracker Error - Populate Routing Back', 'Failed to add time tracker line for employee 5: ' + timeTrackerError3.toString());
+                    }
+                } else {
+                    log.debug('Time Tracker', 'Skipping time tracker - no customer ID found on IF: ' + ifTranId);
+                }
+            } catch (timeTrackerError) {
+                // Log error but don't fail the IF creation
+                log.error('Time Tracker Error', 'Failed to add time tracker lines for IF ' + ifTranId + ': ' + timeTrackerError.toString());
+            }
+            
             return ifId;
             
         } catch (e) {
@@ -655,12 +716,20 @@ define(['N/search', 'N/log', 'N/record', 'N/error'], function (search, log, reco
                     value: totalWeight
                 });
                 
+                // Set request type based on weight: >285 lbs = 1, <=285 lbs = 2
+                var requestType = (totalWeight > 285) ? 1 : 2;
+                ifRecord.setValue({
+                    fieldId: 'custbody_request_type',
+                    value: requestType
+                });
+                log.debug('applyAmazonRoutingRequest', 'Set custbody_request_type to ' + requestType + ' (weight: ' + totalWeight.toFixed(2) + ' lbs)');
+                
                 ifRecord.setValue({
                     fieldId: 'custbody_total_pallets',
                     value: totalPallets
                 });
                 
-                log.debug('applyAmazonRoutingRequest', 'Routing fields set - Loc: ' + locationId + ', Amazon#: ' + amazonLocationNumber + ', Cartons: ' + totalCartons + ', Vol: ' + totalVolume.toFixed(2) + ' cu ft, Wt: ' + totalWeight.toFixed(2) + ', Pallets: ' + totalPallets);
+                log.debug('applyAmazonRoutingRequest', 'Routing fields set - Loc: ' + locationId + ', Amazon#: ' + amazonLocationNumber + ', Cartons: ' + totalCartons + ', Vol: ' + totalVolume.toFixed(2) + ' cu ft, Wt: ' + totalWeight.toFixed(2) + ', Pallets: ' + totalPallets + ', Request Type: ' + requestType);
                 return true;
             } else {
                 log.warning('applyAmazonRoutingRequest', 'Amazon location number not found for location ' + locationId + ' (' + locationName + '), skipping routing field population');

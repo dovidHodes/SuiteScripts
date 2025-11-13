@@ -9,8 +9,11 @@ define([
   'N/search',
   'N/render',
   'N/record',
-  'N/log'
-], function (search, render, record, log) {
+  'N/log',
+  'N/file',
+  'N/url',
+  './_dsh_lib_time_tracker'  // Time tracker library - same folder or use script ID if uploaded as library
+], function (search, render, record, log, file, url, timeTrackerLib) {
   
   
   /**
@@ -84,30 +87,61 @@ define([
         }
       });
       
-      // Use transaction ID from earlier load for file name in log
-      log.audit('Generate BOL', 'PDF generated and attached successfully. File ID: ' + fileId + ', File Name: BOL_' + tranId + '.pdf');
+      // Get PDF URL for storing in IF field
+      var pdfUrl = '';
+      try {
+        var pdfFile = file.load({ id: fileId });
+        var domain = url.resolveDomain({ hostType: url.HostType.APPLICATION });
+        pdfUrl = 'https://' + domain + pdfFile.url;
+        log.debug('BOL PDF URL', 'Generated PDF URL: ' + pdfUrl);
+      } catch (urlError) {
+        log.error('Error getting PDF URL', 'Failed to generate PDF URL: ' + urlError.toString());
+      }
       
-      // Step 5: Add time tracker line for BOL creation
-      // Action ID 6 = "Create BOL" (6th action in the list)
+      // Use transaction ID from earlier load for file name in log
+      log.audit('Generate BOL', 'PDF generated and attached successfully. File ID: ' + fileId + ', File Name: BOL_' + tranId + '.pdf, URL: ' + pdfUrl);
+      
+      // Step 5: Add time tracker lines for BOL creation
+      // Action ID 6 = "Create BOL" (6th action in the list) - Employee 5
+      // Action ID 9 = "Print BOL" (9th action in the list) - Employee 3554
       try {
         var customerId = ifRecord.getValue('entity');
         if (customerId) {
-          addTimeTrackerLine({
-            actionId: 6, // Create BOL action ID
-            customerId: customerId,
-            timeSaved: 60, // 60 seconds
-            employeeId: 5
-          });
+          // First time tracker line - Create BOL (Employee 5)
+          try {
+            timeTrackerLib.addTimeTrackerLine({
+              actionId: 6, // Create BOL action ID
+              customerId: customerId,
+              timeSaved: 60, // 60 seconds
+              employeeId: 5
+            });
+            log.debug('Time Tracker - Create BOL', 'Added time tracker line for employee 5, action 6');
+          } catch (timeTrackerError1) {
+            log.error('Time Tracker Error - Create BOL', 'Failed to add time tracker line for employee 5: ' + timeTrackerError1.toString());
+          }
+          
+          // Second time tracker line - Print BOL (Employee 3554)
+          try {
+            timeTrackerLib.addTimeTrackerLine({
+              actionId: 9, // Print BOL action ID
+              customerId: customerId,
+              timeSaved: 30, // 60 seconds
+              employeeId: 3554
+            });
+            log.debug('Time Tracker - Print BOL', 'Added time tracker line for employee 3554, action 9');
+          } catch (timeTrackerError2) {
+            log.error('Time Tracker Error - Print BOL', 'Failed to add time tracker line for employee 3554: ' + timeTrackerError2.toString());
+          }
         } else {
           log.audit('Time Tracker', 'Skipping time tracker - no customer ID found on IF');
         }
       } catch (timeTrackerError) {
         // Log error but don't fail the BOL generation
-        log.error('Time Tracker Error', 'Failed to add time tracker line: ' + timeTrackerError.toString());
+        log.error('Time Tracker Error', 'Failed to add time tracker lines: ' + timeTrackerError.toString());
       }
       
-      // Step 6: Update IF fields
-      updateIFFields(ifId, jsonData);
+      // Step 6: Update IF fields (including PDF link)
+      updateIFFields(ifId, jsonData, pdfUrl);
       
       return {
         success: true,
@@ -504,15 +538,25 @@ define([
    * @param {string} ifId - Item Fulfillment ID
    * @param {Object} jsonData - BOL data object
    */
-  function updateIFFields(ifId, jsonData) {
+  function updateIFFields(ifId, jsonData, pdfUrl) {
     try {
+      var fieldValues = {
+        custbody_sps_billofladingnumber: jsonData.bolNumber
+      };
+      
+      // Add PDF link if available
+      if (pdfUrl) {
+        fieldValues.custbody_link_to_bol = pdfUrl;
+        log.debug('Update IF Fields', 'Setting custbody_link_to_bol to: ' + pdfUrl);
+      }
+      
       record.submitFields({
         type: 'itemfulfillment',
         id: ifId,
-        values: {
-          custbody_sps_billofladingnumber: jsonData.bolNumber
-        }
+        values: fieldValues
       });
+      
+      log.debug('Update IF Fields', 'Updated IF fields - BOL Number: ' + jsonData.bolNumber + ', PDF Link: ' + (pdfUrl || 'not set'));
     } catch (error) {
       log.error('updateIFFields Error', error);
     }
@@ -528,95 +572,6 @@ define([
     var day = date.getDate();
     var year = date.getFullYear();
     return month + '/' + day + '/' + year;
-  }
-  
-  /**
-   * Add a time tracking line to the custom transaction
-   * @param {Object} options
-   * @param {number} options.actionId - Internal ID of the action (custcol_action)
-   * @param {number} options.customerId - Internal ID of the customer (custcol_trading_partner)
-   * @param {number} options.timeSaved - Time saved in seconds (custcol_time_saved)
-   * @param {number} [options.employeeId=5] - Employee ID (custcol_employee), defaults to 5
-   * @returns {string} Record ID of the time tracker transaction
-   */
-  function addTimeTrackerLine(options) {
-    try {
-      // Load the existing time tracker transaction
-      var timeTrackerRecord = record.load({
-        type: 'customtransaction_time_tracker',
-        id: 15829943,
-        isDynamic: true
-      });
-      
-      // Get the current line count
-      var lineCount = timeTrackerRecord.getLineCount({
-        sublistId: 'line'
-      });
-      
-      // Insert a new line at the end of the sublist
-      timeTrackerRecord.insertLine({
-        sublistId: 'line',
-        line: lineCount // Inserts at the end (0-indexed)
-      });
-      
-      // Select the newly inserted line
-      timeTrackerRecord.selectLine({
-        sublistId: 'line',
-        line: lineCount
-      });
-      
-      // Set values for fields on the newly inserted line
-      timeTrackerRecord.setCurrentSublistValue({
-        sublistId: 'line',
-        fieldId: 'account',
-        value: 619
-      });
-      
-      timeTrackerRecord.setCurrentSublistValue({
-        sublistId: 'line',
-        fieldId: 'amount',
-        value: 0
-      });
-      
-      timeTrackerRecord.setCurrentSublistValue({
-        sublistId: 'line',
-        fieldId: 'custcol_action',
-        value: options.actionId
-      });
-      
-      timeTrackerRecord.setCurrentSublistValue({
-        sublistId: 'line',
-        fieldId: 'custcol_trading_partner',
-        value: options.customerId
-      });
-      
-      timeTrackerRecord.setCurrentSublistValue({
-        sublistId: 'line',
-        fieldId: 'custcol_employee',
-        value: options.employeeId || 5
-      });
-      
-      timeTrackerRecord.setCurrentSublistValue({
-        sublistId: 'line',
-        fieldId: 'custcol_time_saved',
-        value: options.timeSaved
-      });
-      
-      // Commit the line
-      timeTrackerRecord.commitLine({
-        sublistId: 'line'
-      });
-      
-      // Save the record
-      var recordId = timeTrackerRecord.save();
-      
-      log.audit('Time Tracker', 'Added line to time tracker record: ' + recordId + ' for customer: ' + options.customerId + ', time saved: ' + options.timeSaved + ' seconds');
-      
-      return recordId;
-    } catch (e) {
-      log.error('Time Tracker Error', 'Failed to add time tracker line: ' + e.toString());
-      throw e;
-    }
   }
   
   return {
