@@ -1,18 +1,32 @@
-# NetSuite
+# NetSuite SuiteScripts
 
-NetSuite automation scripts and utilities for EDI processing, invoice management, and POD (Proof of Delivery) document retrieval.
+NetSuite automation scripts and utilities for EDI processing, invoice management, POD (Proof of Delivery) document retrieval, BOL generation, label printing, and workflow automation.
 
 ## Project Structure
 
 ```
 ├── README.md                           # This file
 ├── NetSuite_Troubleshooting_Memories.md # Lessons learned and troubleshooting guide
-├── EDI_Error_Record_Reference.md       # EDI error record structure reference
+├── .gitignore                          # Git ignore patterns for secrets and temporary files
 └── scripts/                            # NetSuite scripts folder
-    ├── setInvoiceAsReadyToSend.js      # Auto-approve invoices for EDI transmission
-    ├── setIFasReadyToSend.js           # Set Item Fulfillments as ready to send
-    ├── retrieve_and_attach_PODs.js     # Automated FedEx POD document retrieval and attachment
-    └── wmSecheduledGetPODs.js          # Scheduled script to call POD suitelet for packages
+    ├── AGA/                            # AGA customer-specific scripts
+    │   ├── Approve EDI button/         # EDI approval button functionality
+    │   ├── reconcilePackages/          # Package reconciliation scripts
+    │   ├── retrieve_and_attach_PODs.js # FedEx POD document retrieval
+    │   ├── setIFasReadyToSend.js       # Set Item Fulfillments as ready to send
+    │   ├── setInvoiceAsReadyToSend.js  # Auto-approve invoices for EDI transmission
+    │   └── wmSecheduledGetPODs.js      # Scheduled POD retrieval
+    └── Jool/                           # Jool customer-specific scripts
+        ├── Approve AVC orders/         # AVC order approval automation
+        ├── Auto Pack IFs/              # Automated Item Fulfillment packing
+        ├── Batch print labels/         # Batch label printing and merging
+        ├── BOL/                        # Bill of Lading generation
+        ├── Create IFs/                 # Item Fulfillment creation automation
+        ├── SPS Scripts/                # SPS Commerce integration scripts
+        │   ├── Autopack/               # SPS autopack functionality
+        │   ├── Batch print/            # SPS batch label printing
+        │   └── IF buttons/             # Item Fulfillment button enhancements
+        └── time tracker/               # Time tracking library and documentation
 ```
 
 ## Scripts
@@ -69,10 +83,103 @@ Scheduled script that processes packages from a saved search and calls the POD r
 #### Required Script Parameters
 • `custscript_saved_search_id`: ID of saved search containing packages to process
 
+## Jool Scripts
+
+### BOL (Bill of Lading) Generation
+Automated BOL generation from Item Fulfillment records with support for both button-triggered and scheduled execution.
+
+**Key Features:**
+- Library script pattern for code reusability
+- Button-triggered generation via Suitelet
+- Scheduled automated generation
+- PDF attachment to Item Fulfillment records
+- Advanced PDF/HTML template support
+
+**Files:**
+- `_dsh_lib_bol_generator.js` - Core library with shared BOL generation logic
+- `_dsh_sl_single_bol_generate.js` - Suitelet for button-triggered generation
+- `_dsh_sch_bol_scheduled.js` - Scheduled script for automated generation
+- `_dsh_ue_if_bol_button.js` - User Event script that adds BOL button to IF form
+- `_dsh_cs_single_bol_button.js` - Client script for button click handling
+
+See `scripts/Jool/BOL/README.md` for detailed documentation.
+
+### Batch Print Labels
+Automated batch printing of carton labels with PDF merging capabilities.
+
+**Key Features:**
+- SPS Commerce integration for label generation
+- Batch processing of multiple labels (75 labels per PDF)
+- Automatic PDF merging for Item Fulfillments with multiple label files
+- Scheduled and manual trigger options
+
+**Files:**
+- `_dsh_sch_batch_print_labels.js` - Scheduled script to find IFs needing labels
+- `_dsh_mr_merge_labels.js` - Map/Reduce script to merge multiple label PDFs
+- `_dsh_sch_batch_and_attach.js` - Scheduled script to batch merge and attach labels
+- `_dsh_ue_if_label_link.js` - User Event to capture label PDF links
+
+**SPS Label Details:**
+- SPS script generates **75 carton labels per PDF**
+- Multiple PDFs are created when an IF has more than 75 packages
+- PDFs are named: `{tranid} Label {X} of {Y}.pdf`
+- Merge script combines all PDFs into a single merged file
+
+### Approve AVC Orders
+Automated approval of AVC (Advanced Vendor Catalog) orders with warehouse-specific logic.
+
+**Key Features:**
+- Entity-specific processing (entity 1716)
+- Warehouse buffer stock management
+- Automatic approval based on inventory availability
+- Time tracking integration
+
+**Files:**
+- `setAndApproveAVCOrders.js` - User Event script for order approval
+
+### Time Tracker
+Centralized time tracking system for measuring automation savings.
+
+**Key Features:**
+- Library function for consistent implementation
+- Automatic datetime tracking
+- Custom transaction-based tracking
+- Support for multiple action types
+
+**Files:**
+- `_dsh_lib_time_tracker.js` - Reusable library function
+- `TIME_TRACKER.md` - Complete implementation and usage guide
+
+**Tracked Actions:**
+1. Approve order
+2. Create Item fulfillment
+3. Request Routing
+4. Populate routing
+5. Autopack IF
+6. Create BOL
+7. Print ASN labels
+8. Batch & upload labels
+
+### SPS Scripts
+SPS Commerce integration scripts for autopack, batch printing, and Item Fulfillment management.
+
+**Key Features:**
+- SPS API integration
+- Automated packing workflows
+- Batch label generation (75 labels per PDF)
+- Item Fulfillment creation and management
+
+**Directories:**
+- `Autopack/` - Automated packing scripts
+- `Batch print/` - Label batch printing scripts
+- `IF buttons/` - Item Fulfillment button enhancements
+
 ## Documentation
 
 - **NetSuite_Troubleshooting_Memories.md**: Comprehensive troubleshooting guide with lessons learned from NetSuite development
 - **EDI_Error_Record_Reference.md**: Reference for EDI error record structure and usage patterns
+- **scripts/Jool/BOL/README.md**: Detailed BOL generation documentation
+- **scripts/Jool/time tracker/TIME_TRACKER.md**: Complete time tracker implementation and usage guide
 
 ## Getting Started
 

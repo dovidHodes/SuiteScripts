@@ -15,3 +15,38 @@
 # Logs
 *.log
 
+# Secrets and tokens
+.github_token
+*.token
+*.key
+*.pem
+*.p12
+.env
+.env.local
+*.secret
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+*~
+
+# Node modules (if any)
+node_modules/
+package-lock.json
+yarn.lock
+
+# Python (if any)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+
+# NetSuite specific
+*.nsm
+*.nsa
+

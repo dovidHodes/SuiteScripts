@@ -1,7 +1,7 @@
-# Time Tracker Custom Transaction Implementation Guide
+# Time Tracker Implementation Guide
 
 ## Overview
-This document outlines the requirements for implementing time tracking functionality in SuiteScripts. When certain tasks are executed, lines should be added to a custom transaction to track time saved.
+This document outlines the requirements and usage patterns for implementing time tracking functionality in SuiteScripts. When certain tasks are executed, lines should be added to a custom transaction to track time saved.
 
 ## Custom Transaction Details
 
@@ -15,8 +15,8 @@ When adding a line to the custom transaction, the following fields must be popul
 
 | Field | Value/Type | Description |
 |-------|-----------|-------------|
-| `account` | `619` | Account ID (fixed value) |
-| `amount` | `0` | Amount (fixed value) |
+| `account` | `621` | Account ID (fixed value) |
+| `amount` | `0` | Amount (fixed value, set to 0.01 initially, then changed to 0 by User Event script) |
 | `custcol_action` | Internal ID (varies) | Action being performed (see Action List below) |
 | `custcol_trading_partner` | Internal ID | Customer ID for whom the action is being run |
 | `custcol_employee` | `5` | Employee who saved time (currently hardcoded to internal ID 5) |
@@ -38,6 +38,75 @@ Based on the workflow, the following actions need to be tracked. Each action has
 
 > **Note:** The internal IDs for each action need to be determined from the NetSuite custom field setup. These IDs will vary based on your NetSuite configuration.
 
+## Usage Pattern: Always Use the Library Function
+
+**For all new projects, use the library function** located at:
+- `scripts/Jool/time tracker/_dsh_lib_time_tracker.js`
+
+The library automatically handles datetime tracking (`custcol_date_time`) and provides consistent implementation across all projects.
+
+### Import the Library
+
+**IMPORTANT:** Use `./_dsh_lib_time_tracker` when the library is uploaded to the same folder in NetSuite's File Cabinet (SuiteScripts folder).
+
+```javascript
+define([
+  'N/record',
+  'N/log',
+  './_dsh_lib_time_tracker'  // Same folder pattern - library must be in same File Cabinet folder
+], function (record, log, timeTrackerLib) {
+  // Your code here
+});
+```
+
+**Note:** If the library is uploaded as a library script in NetSuite with a script ID, you may need to use the script ID instead (e.g., `'customscript_dsh_lib_time_tracker'`). The `./` pattern works when both files are in the same SuiteScripts folder structure.
+
+### Call the Function When Adding Lines
+
+```javascript
+// After successfully completing an action that should be tracked
+try {
+  var customerId = record.getValue('entity'); // or wherever customer ID comes from
+  if (customerId) {
+    timeTrackerLib.addTimeTrackerLine({
+      actionId: 6,        // Action ID (see Action List above)
+      customerId: customerId,
+      timeSaved: 60,      // Time saved in seconds
+      employeeId: 5       // Optional, defaults to 5
+    });
+  }
+} catch (timeTrackerError) {
+  // Log error but don't fail the main functionality
+  log.error('Time Tracker Error', 'Failed to add time tracker line: ' + timeTrackerError.toString());
+}
+```
+
+### Example: BOL Generation
+
+```javascript
+// After BOL PDF is generated and attached
+try {
+  var customerId = ifRecord.getValue('entity');
+  if (customerId) {
+    timeTrackerLib.addTimeTrackerLine({
+      actionId: 6, // Create BOL
+      customerId: customerId,
+      timeSaved: 60, // 60 seconds saved
+      employeeId: 5
+    });
+  }
+} catch (timeTrackerError) {
+  log.error('Time Tracker Error', 'Failed to add time tracker line: ' + timeTrackerError.toString());
+}
+```
+
+## Key Points
+
+1. **Always use the library function** - Don't duplicate the logic
+2. **Datetime is automatic** - The library automatically sets `custcol_date_time` to current date/time
+3. **Error handling** - Wrap in try/catch so time tracker failures don't break main functionality
+4. **Customer ID required** - Only add lines when customer ID is available
+
 ## Implementation Notes
 
 ### When to Add Lines
@@ -49,42 +118,7 @@ Based on the workflow, the following actions need to be tracked. Each action has
 - **custcol_time_saved:** Should be calculated or passed as the number of seconds saved by automating this action
 - **custcol_employee:** Currently hardcoded to internal ID `5`, but may need to be dynamic in the future
 
-## Recommended: Use Library Function
-
-**For all new projects, use the library function** located at:
-- `scripts/Jool/time tracker/_dsh_lib_time_tracker.js`
-
-See `USAGE_PATTERN.md` for details on how to use the library function. The library automatically handles datetime tracking (`custcol_date_time`).
-
-### Example: Using Library Function (Recommended)
-
-```javascript
-// Import the library
-// IMPORTANT: Use './_dsh_lib_time_tracker' when library is in same folder in NetSuite File Cabinet
-define([
-  'N/record',
-  'N/log',
-  './_dsh_lib_time_tracker'  // Same folder pattern - library must be in same File Cabinet folder
-], function (record, log, timeTrackerLib) {
-  
-  // After completing an action
-  try {
-    var customerId = record.getValue('entity');
-    if (customerId) {
-      timeTrackerLib.addTimeTrackerLine({
-        actionId: 6,        // Create BOL
-        customerId: customerId,
-        timeSaved: 60,      // seconds
-        employeeId: 5
-      });
-    }
-  } catch (e) {
-    log.error('Time Tracker Error', e);
-  }
-});
-```
-
-### Manual Implementation Pattern (Legacy)
+## Manual Implementation Pattern (Legacy - Not Recommended)
 
 If you cannot use the library function, use this pattern:
 
@@ -113,14 +147,14 @@ function addTimeTrackerLine(options) {
             sublistId: 'line',
             fieldId: 'account',
             line: lineId,
-            value: 619
+            value: 621
         });
         
         timeTrackerRecord.setSublistValue({
             sublistId: 'line',
             fieldId: 'amount',
             line: lineId,
-            value: 0
+            value: 0.01 // Will be set to 0 by User Event script
         });
         
         timeTrackerRecord.setSublistValue({
@@ -151,7 +185,7 @@ function addTimeTrackerLine(options) {
             value: options.timeSaved
         });
         
-        // Set datetime when line was added (current date/time)
+        // Set datetime when line was added (current date/time) - REQUIRED
         var currentDateTime = new Date();
         timeTrackerRecord.setSublistValue({
             sublistId: 'line',
@@ -190,6 +224,28 @@ A User Event script (`_dsh_ue_time_tracker_amount.js`) has been created to autom
    - **Log Level:** Debug (for testing) or Error (for production)
    - **Execute As:** Administrator
 5. Save and activate the deployment
+
+## Benefits of Using Library
+
+- ✅ Automatic datetime tracking (`custcol_date_time`)
+- ✅ Consistent implementation across all projects
+- ✅ Single source of truth for time tracker logic
+- ✅ Easy to update - change once, applies everywhere
+- ✅ Proper error handling built-in
+
+## Future Projects
+
+When creating new projects that need time tracking:
+
+1. **Import the library** using `./_dsh_lib_time_tracker` (same folder pattern - library must be in same File Cabinet folder in NetSuite)
+2. **Call `addTimeTrackerLine()`** after the tracked action completes
+3. **Use try/catch** to prevent time tracker errors from breaking main functionality
+4. **Include customer ID check** - only track when customer is available
+
+**Import Pattern (Remember):**
+- Use `./_dsh_lib_time_tracker` when both scripts are in the same folder in NetSuite's File Cabinet
+- This is the standard pattern used in BOL and Approve Order scripts
+- If library is uploaded as a script with a script ID, you may need to use the script ID instead
 
 ## Next Steps
 
