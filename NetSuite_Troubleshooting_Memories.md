@@ -298,6 +298,30 @@ log.audit('Warning', 'Message');
 - `customrecord_shipping_account_list` vs `customtransaction_shipping_account_list`
 - Sublist names: `'item'` vs `'line'`
 
+## Time Tracker Library Import Pattern
+
+### IMPORTANT: NetSuite File Cabinet Paths
+**Problem**: Scripts are organized in different local folders, but in NetSuite they're all uploaded to the same SuiteScripts folder
+**Solution**: Always use `'./_dsh_lib_time_tracker'` for time tracker library imports, NOT relative paths like `'../time tracker/_dsh_lib_time_tracker'`
+
+```javascript
+// ✅ CORRECT - Use same folder pattern (all scripts in same NetSuite File Cabinet folder)
+define(['N/record', 'N/log', './_dsh_lib_time_tracker'], function (record, log, timeTrackerLib) {
+    // Script code
+});
+
+// ❌ WRONG - Don't use local file system paths
+define(['N/record', 'N/log', '../time tracker/_dsh_lib_time_tracker'], function (record, log, timeTrackerLib) {
+    // This won't work in NetSuite!
+});
+```
+
+**Key Points**:
+- All scripts are uploaded to the same SuiteScripts folder in NetSuite's File Cabinet
+- The `./` pattern means "same folder" in NetSuite, not local file system
+- If library is uploaded as a script with a script ID, use the script ID instead: `'customscript_dsh_lib_time_tracker'`
+- This applies to ALL library imports in NetSuite scripts
+
 ## Repository Management Best Practices
 
 ### Adding New Scripts

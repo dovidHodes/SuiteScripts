@@ -12,7 +12,7 @@
  * Sets custbody_requested_autopack = true only after MR task is successfully submitted (not failed).
  */
 
-define(['N/search', 'N/log', 'N/record', 'N/task', 'N/runtime'], function (search, log, record, task, runtime) {
+define(['N/search', 'N/log', 'N/record', 'N/task', 'N/runtime', './_dsh_lib_time_tracker'], function (search, log, record, task, runtime, timeTrackerLib) {
     
     /**
      * Executes when the scheduled script is triggered
@@ -355,6 +355,26 @@ define(['N/search', 'N/log', 'N/record', 'N/task', 'N/runtime'], function (searc
                         // Field already set upfront, so no need to set again
                         scheduledCount++;
                         log.debug('scheduleSpsMrAutopack', 'Successfully scheduled MR task ' + taskId + ' for IF ' + tranId + ' (ID: ' + ifId + '). Status: ' + taskStatus.status + '. Field already set.');
+                        
+                        // Add time tracker line for autopack IF
+                        // Action ID 5 = "Autopack IF" (5th action in the list) - Employee 5
+                        try {
+                            var entityId = ifData.entityId;
+                            if (entityId) {
+                                timeTrackerLib.addTimeTrackerLine({
+                                    actionId: 5, // Autopack IF action ID
+                                    customerId: entityId,
+                                    timeSaved: 5, // 5 seconds per IF
+                                    employeeId: 5
+                                });
+                                log.debug('Time Tracker - Autopack IF', 'Added time tracker line for employee 5, action 5, IF: ' + tranId);
+                            } else {
+                                log.debug('Time Tracker', 'Skipping time tracker - no customer ID found on IF: ' + tranId);
+                            }
+                        } catch (timeTrackerError) {
+                            // Log error but don't fail the scheduling
+                            log.error('Time Tracker Error - Autopack IF', 'Failed to add time tracker line for IF ' + tranId + ': ' + timeTrackerError.toString());
+                        }
                     } else {
                         // Task failed immediately - reset the field so it can be retried
                         failedCount++;
@@ -383,6 +403,26 @@ define(['N/search', 'N/log', 'N/record', 'N/task', 'N/runtime'], function (searc
                     // Field already set upfront, so no need to set again
                     scheduledCount++;
                     log.debug('scheduleSpsMrAutopack', 'Could not check task status for ' + taskId + ', but task was submitted. Assuming success. Field already set. Error: ' + statusError.toString());
+                    
+                    // Add time tracker line for autopack IF (assuming success)
+                    // Action ID 5 = "Autopack IF" (5th action in the list) - Employee 5
+                    try {
+                        var entityId = ifData.entityId;
+                        if (entityId) {
+                            timeTrackerLib.addTimeTrackerLine({
+                                actionId: 5, // Autopack IF action ID
+                                customerId: entityId,
+                                timeSaved: 5, // 5 seconds per IF
+                                employeeId: 5
+                            });
+                            log.debug('Time Tracker - Autopack IF', 'Added time tracker line for employee 5, action 5, IF: ' + tranId + ' (status check failed but task submitted)');
+                        } else {
+                            log.debug('Time Tracker', 'Skipping time tracker - no customer ID found on IF: ' + tranId);
+                        }
+                    } catch (timeTrackerError) {
+                        // Log error but don't fail the scheduling
+                        log.error('Time Tracker Error - Autopack IF', 'Failed to add time tracker line for IF ' + tranId + ': ' + timeTrackerError.toString());
+                    }
                 }
                 
             } catch (e) {
