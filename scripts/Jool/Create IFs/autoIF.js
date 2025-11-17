@@ -15,8 +15,9 @@ define([
     'N/log', 
     'N/record', 
     'N/error',
-    './_dsh_lib_time_tracker'  // Time tracker library - same folder in SuiteScripts
-], function (search, log, record, error, timeTrackerLib) {
+    './_dsh_lib_time_tracker',  // Time tracker library - same SuiteScripts folder in NetSuite
+    './_dsh_lib_routing_calculator'  // Routing calculator library - same SuiteScripts folder in NetSuite
+], function (search, log, record, error, timeTrackerLib, routingLib) {
     
 
     function getInputData(inputContext) {
@@ -252,7 +253,10 @@ define([
             // Calculate pickup date from SO MABD (only for entity 1716, part of routing logic)
             var requestedPickupDate = null;
             if (parseInt(entityId) === 1716) {
-                requestedPickupDate = calculatePickupDateFromMABD(soRecord, tranId);
+                var mabdDate = soRecord.getValue('custbody_gbs_mabd');
+                if (mabdDate) {
+                    requestedPickupDate = routingLib.calculatePickupDateFromMABD(mabdDate, tranId);
+                }
             }
             
             // Create one IF per location
@@ -449,58 +453,18 @@ define([
             log.debug('createItemFulfillment', 'IF saved as ' + ifTranId);
             
             // If entity is 1716, run Amazon routing request AFTER saving
-            // This calculates routing info from the IF quantities only (not SO)
-            var routingFieldsSet = false;
-            var pickupDateSet = false;
-            
+            // Library handles everything: routing fields, pickup date, routing status
             if (parseInt(entityId) === 1716) {
                 log.debug('createItemFulfillment', 'Entity is 1716, running Amazon routing request field population from IF quantities');
-                routingFieldsSet = applyAmazonRoutingRequest(savedIfRecord, locationId, soTranIdValue, ifTranId);
                 
-                // Set requested pickup date if calculated (requestedPickupDate is a Date object)
-                // Wrap in try-catch so date errors don't fail the entire IF creation
-                if (requestedPickupDate) {
-                    try {
-                        savedIfRecord.setValue({
-                            fieldId: 'custbody_sps_date_118',
-                            value: requestedPickupDate
-                        });
-                        pickupDateSet = true;
-                        log.debug('createItemFulfillment', 'Set custbody_sps_date_118 to ' + formatDateForLog(requestedPickupDate) + ' for IF ' + ifTranId);
-                    } catch (dateError) {
-                        log.error('createItemFulfillment', 'Error setting pickup date on IF ' + ifTranId + ': ' + dateError.toString());
-                        log.error('createItemFulfillment', 'Pickup date value was: ' + formatDateForLog(requestedPickupDate));
-                        // Continue - don't fail the IF creation just because date field failed
-                        pickupDateSet = false;
-                    }
-                } else {
-                    log.debug('createItemFulfillment', 'No pickup date calculated or date too close, leaving custbody_sps_date_118 blank');
-                }
+                // Calculate and apply routing fields using library (handles everything)
+                var routingSuccess = routingLib.calculateAndApplyRoutingFields(ifId);
                 
-                // If routing fields and pickup date were set successfully, set routing status
-                if (routingFieldsSet && pickupDateSet) {
-                    try {
-                        savedIfRecord.setValue({
-                            fieldId: 'custbody_routing_status',
-                            value: 1
-                        });
-                        log.debug('createItemFulfillment', 'Set custbody_routing_status to 1 (ready for routing request)');
-                    } catch (statusError) {
-                        log.error('createItemFulfillment', 'Error setting routing status on IF ' + ifTranId + ': ' + statusError.toString());
-                        // Continue - don't fail the IF creation
-                    }
+                if (!routingSuccess) {
+                    log.warning('createItemFulfillment', 'Failed to calculate and apply routing fields for IF ' + ifTranId);
                 }
             } else {
                 log.debug('createItemFulfillment', 'Entity is ' + entityId + ' (not 1716), skipping Amazon routing request');
-            }
-            
-            // Save again after setting all fields (only if we made changes)
-            try {
-                savedIfRecord.save();
-                log.debug('createItemFulfillment', 'IF ' + ifTranId + ' updated with routing information and pickup date');
-            } catch (saveError) {
-                log.error('createItemFulfillment', 'Error saving IF ' + ifTranId + ' after setting routing fields: ' + saveError.toString());
-                // Continue - IF was already created successfully, this is just an update
             }
             
             log.audit('createItemFulfillment', 'Successfully created IF ' + ifTranId + ' for location ' + locationId + ' on SO ' + soTranIdValue);
@@ -579,316 +543,6 @@ define([
     }
     
 
-    function applyAmazonRoutingRequest(ifRecord, locationId, soTranId, ifTranId) {
-        try {
-            // Load the location record to get the Amazon location number
-            var locationRecord = record.load({
-                type: 'location',
-                id: locationId
-            });
-            
-            var locationName = locationRecord.getValue({
-                fieldId: 'name'
-            });
-            
-            var amazonLocationNumber = locationRecord.getValue({
-                fieldId: 'custrecord_amazon_location_number'
-            });
-            
-            log.debug('applyAmazonRoutingRequest', 'Starting routing calculation - Location: ' + locationName + ', Amazon Loc#: ' + (amazonLocationNumber || 'NOT SET') + ', SO: ' + (soTranId || 'N/A') + ', IF: ' + (ifTranId || 'N/A') + ' - Using IF quantities only');
-            
-            // Initialize totals for cartons, volume, weight, and pallets
-            var totalCartons = 0;
-            var totalVolume = 0;
-            var totalWeight = 0;
-            var totalPalletFraction = 0.0;
-            
-            // Get line count from IF (only fulfilled lines)
-            var lineCount = ifRecord.getLineCount({
-                sublistId: 'item'
-            });
-            
-            // Process each item line for carton/volume/weight/pallet calculations
-            // Use IF quantities only (itemquantity from the IF)
-            for (var i = 0; i < lineCount; i++) {
-                var itemId = ifRecord.getSublistValue({
-                    sublistId: 'item',
-                    fieldId: 'item',
-                    line: i
-                });
-                
-                // Get quantity from IF (this is the fulfilled quantity, not SO quantity)
-                var itemQuantity = ifRecord.getSublistValue({
-                    sublistId: 'item',
-                    fieldId: 'itemquantity',
-                    line: i
-                });
-                
-                // Check if this line is actually being fulfilled (itemreceive = true)
-                var itemReceive = ifRecord.getSublistValue({
-                    sublistId: 'item',
-                    fieldId: 'itemreceive',
-                    line: i
-                });
-                
-                // Only process lines that are being fulfilled (itemreceive = true) and have quantity > 0
-                if (itemId && itemQuantity > 0 && itemReceive) {
-                    // Load the item record
-                    var itemRecord = record.load({
-                        type: 'inventoryitem',
-                        id: itemId
-                    });
-                    
-                    var itemName = itemRecord.getValue('itemid') || itemId;
-                    
-                    // Calculate cartons - always use custitemunits_per_carton
-                    var unitsPerCarton = itemRecord.getValue('custitemunits_per_carton') || 1;
-                    var itemCartons = Math.ceil(itemQuantity / unitsPerCarton);
-                    totalCartons += itemCartons;
-                    
-                    // Get cubic feet per carton
-                    var cubicFeetPerCarton = itemRecord.getValue('custitemcustitem_carton_cbf') || 0;
-                    var itemVolume = cubicFeetPerCarton * Math.max(1, itemCartons); // Minimum 1 carton
-                    totalVolume += itemVolume;
-                    
-                    // Get weight per carton - always use custitemweight_carton_1
-                    var weightPerCarton = itemRecord.getValue('custitemweight_carton_1') || 0;
-                    var itemWeight = weightPerCarton * Math.max(1, itemCartons); // Minimum 1 carton
-                    totalWeight += itemWeight;
-                    
-                    // Get units per pallet based on location for pallet calculation
-                    var unitsPerPallet = 0;
-                    if (parseInt(locationId) === 4) { // Westmark
-                        unitsPerPallet = itemRecord.getValue('custitem_units_per_pallet_westmark') || 1;
-                    } else if (parseInt(locationId) === 38) { // Rutgers
-                        unitsPerPallet = itemRecord.getValue('custitemunits_per_pallet') || 1;
-                    } else {
-                        unitsPerPallet = 1; // Default to 1 if location not recognized
-                    }
-                    
-                    // Calculate pallet fraction for this item and add to total
-                    var palletFraction = 0;
-                    if (unitsPerPallet > 0) {
-                        palletFraction = itemQuantity / unitsPerPallet;
-                        totalPalletFraction += palletFraction;
-                    } else {
-                        // If unitsPerPallet is 0 or invalid, treat as 1 unit per pallet
-                        palletFraction = itemQuantity;
-                        totalPalletFraction += itemQuantity;
-                    }
-                    
-                    log.debug('applyAmazonRoutingRequest', 'Line ' + i + ': ' + itemName + ' - Qty: ' + itemQuantity + ', Cartons: ' + itemCartons + ', Vol: ' + itemVolume.toFixed(2) + ' cu ft, Wt: ' + itemWeight.toFixed(2) + ', Units/Pallet: ' + unitsPerPallet + ', PalletFrac: ' + palletFraction.toFixed(3));
-                }
-            }
-            
-            // Round up to get total pallets (since you can't have a partial physical pallet)
-            // Ensure at least 1 pallet if there are any items
-            var totalPallets = Math.max(1, Math.ceil(totalPalletFraction));
-            
-            log.debug('applyAmazonRoutingRequest', 'Totals - Cartons: ' + totalCartons + ', Vol: ' + totalVolume.toFixed(2) + ' cu ft, Wt: ' + totalWeight.toFixed(2) + ', PalletFrac: ' + totalPalletFraction.toFixed(3) + ', Pallets: ' + totalPallets);
-            
-            if (amazonLocationNumber) {
-                // Set the custbody_ship_from_location field with the location internal ID
-                ifRecord.setValue({
-                    fieldId: 'custbody_ship_from_location',
-                    value: locationId
-                });
-                
-                // Set the warehouse location number on the Item Fulfillment
-                ifRecord.setValue({
-                    fieldId: 'custbody_warehouse_location_number',
-                    value: amazonLocationNumber
-                });
-                
-                // Set the calculated totals
-                ifRecord.setValue({
-                    fieldId: 'custbody_total_cartons',
-                    value: totalCartons
-                });
-                
-                ifRecord.setValue({
-                    fieldId: 'custbody_total_volume',
-                    value: totalVolume
-                });
-                
-                ifRecord.setValue({
-                    fieldId: 'custbody_total_weight',
-                    value: totalWeight
-                });
-                
-                // Set request type based on weight: >285 lbs = 1, <=285 lbs = 2
-                var requestType = (totalWeight > 285) ? 1 : 2;
-                ifRecord.setValue({
-                    fieldId: 'custbody_request_type',
-                    value: requestType
-                });
-                log.debug('applyAmazonRoutingRequest', 'Set custbody_request_type to ' + requestType + ' (weight: ' + totalWeight.toFixed(2) + ' lbs)');
-                
-                ifRecord.setValue({
-                    fieldId: 'custbody_total_pallets',
-                    value: totalPallets
-                });
-                
-                log.debug('applyAmazonRoutingRequest', 'Routing fields set - Loc: ' + locationId + ', Amazon#: ' + amazonLocationNumber + ', Cartons: ' + totalCartons + ', Vol: ' + totalVolume.toFixed(2) + ' cu ft, Wt: ' + totalWeight.toFixed(2) + ', Pallets: ' + totalPallets + ', Request Type: ' + requestType);
-                return true;
-            } else {
-                log.warning('applyAmazonRoutingRequest', 'Amazon location number not found for location ' + locationId + ' (' + locationName + '), skipping routing field population');
-                return false;
-            }
-            
-        } catch (e) {
-            log.error('applyAmazonRoutingRequest', 'Error applying Amazon routing request: ' + e.toString());
-            throw e;
-        }
-    }
-    
-    /**
-     * Calculates the requested pickup date from SO MABD date
-     * Calculates 1 business day before MABD (excluding Saturday and Sunday)
-     * If the calculated date is within 1 business day from today, returns null
-     * @param {Record} soRecord - The Sales Order record
-     * @param {string} soTranId - Sales Order transaction ID for logging
-     * @returns {Date|null} - Date object, or null if should be left blank
-     */
-    function calculatePickupDateFromMABD(soRecord, soTranId) {
-        try {
-            // Get MABD date from SO
-            var mabdDate = soRecord.getValue('custbody_gbs_mabd');
-            
-            if (!mabdDate) {
-                log.debug('calculatePickupDateFromMABD', 'SO ' + soTranId + ' has no MABD date (custbody_gbs_mabd), skipping pickup date calculation');
-                return null;
-            }
-            
-            log.debug('calculatePickupDateFromMABD', 'SO ' + soTranId + ' MABD date: ' + mabdDate);
-            
-            // Calculate 1 business day before MABD (returns Date object)
-            var pickupDateObj = calculateBusinessDaysBefore(mabdDate, 1);
-            
-            if (!pickupDateObj) {
-                log.debug('calculatePickupDateFromMABD', 'Could not calculate pickup date from MABD: ' + mabdDate);
-                return null;
-            }
-            
-            // Set time to midnight for comparison
-            pickupDateObj.setHours(0, 0, 0, 0);
-            
-            // Get current date
-            var today = new Date();
-            today.setHours(0, 0, 0, 0);
-            
-            // Check if pickup date is within 1 business day from today
-            var businessDaysBetween = countBusinessDaysBetween(today, pickupDateObj);
-            
-            if (businessDaysBetween <= 1) {
-                log.debug('calculatePickupDateFromMABD', 'Calculated pickup date ' + formatDateForLog(pickupDateObj) + ' is within 1 business day from today (' + businessDaysBetween + ' business days), will leave field blank');
-                return null;
-            }
-            
-            log.debug('calculatePickupDateFromMABD', 'Calculated pickup date: ' + formatDateForLog(pickupDateObj) + ' (1 business day before MABD: ' + mabdDate + ')');
-            return pickupDateObj;
-            
-        } catch (e) {
-            log.error('calculatePickupDateFromMABD', 'Error calculating pickup date: ' + e.toString());
-            return null;
-        }
-    }
-    
-    /**
-     * Formats a Date object for logging purposes (MM/DD/YYYY)
-     * @param {Date} dateObj - Date object to format
-     * @returns {string} - Formatted date string
-     */
-    function formatDateForLog(dateObj) {
-        if (!dateObj) return 'N/A';
-        var year = dateObj.getFullYear();
-        var month = dateObj.getMonth() + 1;
-        var day = dateObj.getDate();
-        var monthStr = month < 10 ? '0' + month : String(month);
-        var dayStr = day < 10 ? '0' + day : String(day);
-        return monthStr + '/' + dayStr + '/' + year;
-    }
-    
-    /**
-     * Counts the number of business days between two dates (inclusive)
-     * Business days exclude Saturday (6) and Sunday (0)
-     * @param {Date} startDate - The starting date
-     * @param {Date} endDate - The ending date
-     * @returns {number} - Number of business days between the dates (inclusive)
-     */
-    function countBusinessDaysBetween(startDate, endDate) {
-        try {
-            var count = 0;
-            var currentDate = new Date(startDate);
-            var end = new Date(endDate);
-            
-            // Ensure we're comparing dates correctly
-            if (currentDate > end) {
-                var temp = currentDate;
-                currentDate = end;
-                end = temp;
-            }
-            
-            // Count business days from start to end (inclusive)
-            while (currentDate <= end) {
-                var dayOfWeek = currentDate.getDay();
-                // If it's not Saturday (6) or Sunday (0), it's a business day
-                if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-                    count++;
-                }
-                currentDate.setDate(currentDate.getDate() + 1);
-            }
-            
-            return count;
-            
-        } catch (e) {
-            log.error('countBusinessDaysBetween', 'Error counting business days: ' + e.toString());
-            return 0;
-        }
-    }
-    
-    /**
-     * Calculates a date that is N business days before the given date
-     * Business days exclude Saturday (6) and Sunday (0)
-     * @param {Date|string} startDate - The starting date
-     * @param {number} businessDays - Number of business days to go back
-     * @returns {Date|null} - Date object, or null if calculation fails
-     */
-    function calculateBusinessDaysBefore(startDate, businessDays) {
-        try {
-            var date = new Date(startDate);
-            if (isNaN(date.getTime())) {
-                log.error('calculateBusinessDaysBefore', 'Invalid date: ' + startDate);
-                return null;
-            }
-            
-            var daysToSubtract = 0;
-            var businessDaysCounted = 0;
-            
-            // Go back day by day until we've counted enough business days
-            while (businessDaysCounted < businessDays) {
-                daysToSubtract++;
-                var checkDate = new Date(date);
-                checkDate.setDate(date.getDate() - daysToSubtract);
-                
-                var dayOfWeek = checkDate.getDay();
-                // If it's not Saturday (6) or Sunday (0), it's a business day
-                if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-                    businessDaysCounted++;
-                }
-            }
-            
-            var resultDate = new Date(date);
-            resultDate.setDate(date.getDate() - daysToSubtract);
-            resultDate.setHours(0, 0, 0, 0); // Set to midnight
-            
-            return resultDate;
-            
-        } catch (e) {
-            log.error('calculateBusinessDaysBefore', 'Error calculating business days: ' + e.toString());
-            return null;
-        }
-    }
     
     /**
      * Executes when the reduce entry point is triggered and applies to each group of key/value pairs.
