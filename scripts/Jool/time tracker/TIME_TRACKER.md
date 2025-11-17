@@ -41,25 +41,33 @@ Based on the workflow, the following actions need to be tracked. Each action has
 ## Usage Pattern: Always Use the Library Function
 
 **For all new projects, use the library function** located at:
-- `scripts/Jool/time tracker/_dsh_lib_time_tracker.js`
+- Local file path: `scripts/Jool/time tracker/_dsh_lib_time_tracker.js`
 
 The library automatically handles datetime tracking (`custcol_date_time`) and provides consistent implementation across all projects.
 
 ### Import the Library
 
-**IMPORTANT:** Use `./_dsh_lib_time_tracker` when the library is uploaded to the same folder in NetSuite's File Cabinet (SuiteScripts folder).
+**CRITICAL - PATH REQUIREMENT:**
+
+**ALL scripts are uploaded to the SAME SuiteScripts folder in NetSuite's File Cabinet, regardless of local file structure.**
+
+- **Local file structure:** Scripts may be organized in subfolders (e.g., `scripts/Jool/Create IFs/`, `scripts/Jool/BOL/`, etc.)
+- **NetSuite File Cabinet:** ALL scripts are uploaded to the SAME SuiteScripts folder
+- **Import path:** ALWAYS use `'./_dsh_lib_time_tracker'` (same folder reference)
+
+**DO NOT use relative paths based on local file structure** (e.g., `'../time tracker/_dsh_lib_time_tracker'` or `'./time tracker/_dsh_lib_time_tracker'`)
 
 ```javascript
 define([
   'N/record',
   'N/log',
-  './_dsh_lib_time_tracker'  // Same folder pattern - library must be in same File Cabinet folder
+  './_dsh_lib_time_tracker'  // ALWAYS use this - assumes same SuiteScripts folder in NetSuite
 ], function (record, log, timeTrackerLib) {
   // Your code here
 });
 ```
 
-**Note:** If the library is uploaded as a library script in NetSuite with a script ID, you may need to use the script ID instead (e.g., `'customscript_dsh_lib_time_tracker'`). The `./` pattern works when both files are in the same SuiteScripts folder structure.
+**Note:** If the library is uploaded as a library script in NetSuite with a script ID, you may need to use the script ID instead (e.g., `'customscript_dsh_lib_time_tracker'`). However, the standard pattern is `'./_dsh_lib_time_tracker'` when all scripts are in the same SuiteScripts folder.
 
 ### Call the Function When Adding Lines
 
@@ -237,15 +245,17 @@ A User Event script (`_dsh_ue_time_tracker_amount.js`) has been created to autom
 
 When creating new projects that need time tracking:
 
-1. **Import the library** using `./_dsh_lib_time_tracker` (same folder pattern - library must be in same File Cabinet folder in NetSuite)
+1. **Import the library** using `'./_dsh_lib_time_tracker'` (ALWAYS use this path - all scripts are in the same SuiteScripts folder in NetSuite)
 2. **Call `addTimeTrackerLine()`** after the tracked action completes
 3. **Use try/catch** to prevent time tracker errors from breaking main functionality
 4. **Include customer ID check** - only track when customer is available
 
-**Import Pattern (Remember):**
-- Use `./_dsh_lib_time_tracker` when both scripts are in the same folder in NetSuite's File Cabinet
-- This is the standard pattern used in BOL and Approve Order scripts
-- If library is uploaded as a script with a script ID, you may need to use the script ID instead
+**Import Pattern (CRITICAL - ALWAYS USE THIS):**
+- **ALWAYS use:** `'./_dsh_lib_time_tracker'`
+- **DO NOT use:** Relative paths based on local file structure (e.g., `'../time tracker/_dsh_lib_time_tracker'`)
+- **Reason:** All scripts are uploaded to the SAME SuiteScripts folder in NetSuite's File Cabinet, regardless of local folder organization
+- This is the standard pattern used in all scripts (BOL, Approve Order, Create IFs, etc.)
+- If library is uploaded as a script with a script ID, you may need to use the script ID instead, but the standard is `'./_dsh_lib_time_tracker'`
 
 ## Next Steps
 
