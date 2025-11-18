@@ -84,6 +84,15 @@ define(['N/search', 'N/log', 'N/record', 'N/task', 'N/runtime'], function (searc
                 })
             ]
         });
+        
+        // Add summary to ensure we only get unique IFs
+        ifSearch.resultColumns = [
+            search.createColumn({
+                name: 'internalid',
+                summary: search.Summary.GROUP
+            })
+        ];
+        
         log.debug('execute', 'IF search created successfully');
         
         // Process results in batches to avoid governance issues
@@ -117,13 +126,16 @@ define(['N/search', 'N/log', 'N/record', 'N/task', 'N/runtime'], function (searc
                         // Convert to string for consistent comparison
                         var ifIdStr = String(ifId);
                         
-                        // Check if we've already processed this IF in this execution
+                        // Check if we've already processed this IF in this execution - CHECK FIRST
                         if (processedIFIds[ifIdStr]) {
-                            log.debug('execute', 'IF ' + tranId + ' (ID: ' + ifId + ') already processed in this execution, skipping duplicate');
+                            log.debug('execute', 'TranID: ' + tranId + ' - Already processed in this execution, skipping duplicate');
                             return; // Skip this iteration
                         }
                         
-                        log.debug('execute', 'Processing IF: ' + tranId + ' (ID: ' + ifId + '), Entity: ' + entityId);
+                        // Mark as processed IMMEDIATELY to prevent duplicate processing
+                        processedIFIds[ifIdStr] = true;
+                        
+                        log.debug('execute', 'TranID: ' + tranId + ' - Processing IF (ID: ' + ifId + '), Entity: ' + entityId);
                         
                         // Double-check requested_batch_and_attach field by loading the record
                         var requestedBatchAndAttach = false;
@@ -134,22 +146,19 @@ define(['N/search', 'N/log', 'N/record', 'N/task', 'N/runtime'], function (searc
                                 isDynamic: false
                             });
                             requestedBatchAndAttach = ifRecordCheck.getValue('custbody_requested_batch_and_attach');
-                            log.debug('execute', 'IF ' + tranId + ' - Requested batch and attach (from record): ' + requestedBatchAndAttach);
+                            log.debug('execute', 'TranID: ' + tranId + ' - Requested batch and attach field value: ' + requestedBatchAndAttach);
                         } catch (e) {
-                            log.error('execute', 'Error loading IF ' + tranId + ' to check requested_batch_and_attach: ' + e.toString());
+                            log.error('execute', 'TranID: ' + tranId + ' - Error loading IF to check requested_batch_and_attach: ' + e.toString());
                             return;
                         }
                         
                         // Skip if already requested (might have been set by concurrent execution)
                         if (requestedBatchAndAttach === true || requestedBatchAndAttach === 'T') {
-                            log.debug('execute', 'IF ' + tranId + ' (ID: ' + ifId + ') already has requested_batch_and_attach = true, skipping');
-                            processedIFIds[ifIdStr] = true;
+                            log.debug('execute', 'TranID: ' + tranId + ' - Already has requested_batch_and_attach = true, skipping');
                             return;
                         }
                         
                         // Process IF (requested_batch_and_attach is false)
-                        processedIFIds[ifIdStr] = true;
-                        
                         // Add to batch for scheduling
                         ifIdsToSchedule.push({
                             ifId: ifId,
@@ -158,18 +167,18 @@ define(['N/search', 'N/log', 'N/record', 'N/task', 'N/runtime'], function (searc
                         });
                         processedCount++;
                         
-                        log.debug('execute', 'IF ' + tranId + ' (ID: ' + ifId + ') meets criteria, queued for scheduling. Queue size: ' + ifIdsToSchedule.length);
+                        log.debug('execute', 'TranID: ' + tranId + ' - Meets criteria, queued for scheduling. Queue size: ' + ifIdsToSchedule.length);
                         
                         // Schedule MR script when batch is full or at end
                         if (ifIdsToSchedule.length >= batchSize) {
-                            log.debug('execute', 'Batch size reached (' + batchSize + '), scheduling MR tasks');
+                            log.debug('execute', 'Batch size reached (' + batchSize + '), scheduling MR tasks for ' + ifIdsToSchedule.length + ' IF(s)');
                             var scheduled = scheduleBatchAndAttachMR(ifIdsToSchedule);
                             scheduledCount += scheduled;
                             log.debug('execute', 'Scheduled ' + scheduled + ' MR task(s) from batch. Total scheduled so far: ' + scheduledCount);
                             ifIdsToSchedule = [];
                         }
                     } catch (e) {
-                        log.error('execute', 'Error processing IF ' + tranId + ' (ID: ' + ifId + '): ' + e.toString());
+                        log.error('execute', 'TranID: ' + tranId + ' - Error processing IF: ' + e.toString());
                         errorCount++;
                     }
                 });
@@ -217,11 +226,12 @@ define(['N/search', 'N/log', 'N/record', 'N/task', 'N/runtime'], function (searc
             var ifId = ifData.ifId;
             var tranId = ifData.tranId || ifId;
             
-            log.debug('scheduleBatchAndAttachMR', 'Processing IF ' + (index + 1) + ' of ' + ifDataArray.length + ': ' + tranId + ' (ID: ' + ifId + ')');
+            log.debug('scheduleBatchAndAttachMR', 'TranID: ' + tranId + ' - Processing IF ' + (index + 1) + ' of ' + ifDataArray.length + ' (ID: ' + ifId + ')');
             
             try {
                 // Set the field IMMEDIATELY to prevent duplicate processing
                 try {
+                    log.debug('scheduleBatchAndAttachMR', 'TranID: ' + tranId + ' - Loading IF record to set requested_batch_and_attach field');
                     var ifRecordUpdate = record.load({
                         type: record.Type.ITEM_FULFILLMENT,
                         id: ifId,
@@ -231,7 +241,7 @@ define(['N/search', 'N/log', 'N/record', 'N/task', 'N/runtime'], function (searc
                     // Double-check the field isn't already set
                     var currentValue = ifRecordUpdate.getValue('custbody_requested_batch_and_attach');
                     if (currentValue === true || currentValue === 'T') {
-                        log.debug('scheduleBatchAndAttachMR', 'IF ' + tranId + ' (ID: ' + ifId + ') already has requested_batch_and_attach = true, skipping');
+                        log.debug('scheduleBatchAndAttachMR', 'TranID: ' + tranId + ' - Already has requested_batch_and_attach = true, skipping');
                         return; // Skip this IF
                     }
                     
@@ -245,9 +255,9 @@ define(['N/search', 'N/log', 'N/record', 'N/task', 'N/runtime'], function (searc
                         ignoreMandatoryFields: true
                     });
                     
-                    log.debug('scheduleBatchAndAttachMR', 'Set requested_batch_and_attach = true for IF ' + tranId + ' (ID: ' + ifId + ') to prevent duplicate processing');
+                    log.debug('scheduleBatchAndAttachMR', 'TranID: ' + tranId + ' - Set requested_batch_and_attach = true to prevent duplicate processing');
                 } catch (fieldError) {
-                    log.error('scheduleBatchAndAttachMR', 'Error setting requested_batch_and_attach field for IF ' + tranId + ' (ID: ' + ifId + '): ' + fieldError.toString());
+                    log.error('scheduleBatchAndAttachMR', 'TranID: ' + tranId + ' - Error setting requested_batch_and_attach field: ' + fieldError.toString());
                     throw fieldError;
                 }
                 
@@ -256,38 +266,89 @@ define(['N/search', 'N/log', 'N/record', 'N/task', 'N/runtime'], function (searc
                     itemFulfillmentId: ifId
                 });
                 
-                log.debug('scheduleBatchAndAttachMR', 'JSON parameter for IF ' + tranId + ': ' + jsonParam);
+                log.debug('scheduleBatchAndAttachMR', 'TranID: ' + tranId + ' - Built JSON parameter: ' + jsonParam);
                 
-                var mrScriptId = 'customscript_dsh_mr_merge_labels';
-                var mrDeployId = 'customdeploy_dsh_mr_merge_labels';
+                var mrScriptId = 'customscript_mr_merge_and_link_labels';
+                // List of all available deployments to try (7 deployments)
+                var mrDeployIds = [
+                    'customdeploy1',
+                    'customdeploy2',
+                    'customdeploy3',
+                    'customdeploy4',
+                    'customdeploy5',
+                    'customdeploy6',
+                    'customdeploy7'
+                ];
                 
-                // Submit MR task
-                var mrTask = task.create({
-                    taskType: task.TaskType.MAP_REDUCE,
-                    scriptId: mrScriptId,
-                    deploymentId: mrDeployId,
-                    params: {
-                        custscript_dsh_mr_merge_labels_json: jsonParam
+                log.debug('scheduleBatchAndAttachMR', 'TranID: ' + tranId + ' - Attempting to schedule MR script with ' + mrDeployIds.length + ' deployment(s)');
+                
+                // Try each deployment until one succeeds
+                var taskId = null;
+                var deploymentTried = 0;
+                var allDeploymentsBusy = true;
+                
+                for (var d = 0; d < mrDeployIds.length && taskId === null; d++) {
+                    var mrDeployId = mrDeployIds[d];
+                    deploymentTried++;
+                    
+                    try {
+                        log.debug('scheduleBatchAndAttachMR', 'TranID: ' + tranId + ' - Trying deployment ' + mrDeployId + ' (attempt ' + deploymentTried + ' of ' + mrDeployIds.length + ')');
+                        
+                        var mrTask = task.create({
+                            taskType: task.TaskType.MAP_REDUCE,
+                            scriptId: mrScriptId,
+                            deploymentId: mrDeployId,
+                            params: {
+                                custscript_mr_merge_json: jsonParam
+                            }
+                        });
+                        
+                        taskId = mrTask.submit();
+                        log.debug('scheduleBatchAndAttachMR', 'TranID: ' + tranId + ' - MR task submitted successfully using deployment ' + mrDeployId + '. Task ID: ' + taskId);
+                        allDeploymentsBusy = false;
+                        break; // Success, exit loop
+                        
+                    } catch (submitError) {
+                        var errorName = submitError.name || '';
+                        var errorMessage = submitError.message || submitError.toString();
+                        
+                        // Check if it's the MAP_REDUCE_ALREADY_RUNNING error
+                        if (errorName === 'MAP_REDUCE_ALREADY_RUNNING' || errorMessage.indexOf('already running') >= 0) {
+                            log.debug('scheduleBatchAndAttachMR', 'TranID: ' + tranId + ' - Deployment ' + mrDeployId + ' is busy, trying next deployment');
+                            // Continue to next deployment
+                            continue;
+                        } else {
+                            // Different error - log and try next deployment
+                            log.debug('scheduleBatchAndAttachMR', 'TranID: ' + tranId + ' - Error with deployment ' + mrDeployId + ': ' + errorMessage + '. Trying next deployment');
+                            continue;
+                        }
                     }
-                });
+                }
                 
-                var taskId = mrTask.submit();
-                log.debug('scheduleBatchAndAttachMR', 'MR task submitted for IF ' + tranId + '. Task ID: ' + taskId);
+                // If we tried all deployments and none worked
+                if (!taskId) {
+                    if (allDeploymentsBusy) {
+                        throw new Error('All MR deployments are busy. Tried ' + deploymentTried + ' deployment(s).');
+                    } else {
+                        throw new Error('Failed to submit MR task after trying ' + deploymentTried + ' deployment(s)');
+                    }
+                }
                 
                 // Check task status
                 try {
+                    log.debug('scheduleBatchAndAttachMR', 'TranID: ' + tranId + ' - Checking task status for task ' + taskId);
                     var taskStatus = task.checkStatus({
                         taskId: taskId
                     });
                     
-                    log.debug('scheduleBatchAndAttachMR', 'Task ' + taskId + ' status: ' + taskStatus.status);
+                    log.debug('scheduleBatchAndAttachMR', 'TranID: ' + tranId + ' - Task ' + taskId + ' status: ' + taskStatus.status);
                     
                     if (taskStatus.status !== task.TaskStatus.FAILED) {
                         scheduledCount++;
-                        log.debug('scheduleBatchAndAttachMR', 'Successfully scheduled MR task ' + taskId + ' for IF ' + tranId + ' (ID: ' + ifId + '). Status: ' + taskStatus.status + '. Field already set.');
+                        log.debug('scheduleBatchAndAttachMR', 'TranID: ' + tranId + ' - Successfully scheduled MR task ' + taskId + '. Status: ' + taskStatus.status);
                     } else {
                         failedCount++;
-                        log.error('scheduleBatchAndAttachMR', 'MR task ' + taskId + ' for IF ' + tranId + ' (ID: ' + ifId + ') failed immediately. Resetting field for retry.');
+                        log.error('scheduleBatchAndAttachMR', 'TranID: ' + tranId + ' - MR task ' + taskId + ' failed immediately. Resetting field for retry.');
                         // Reset field for retry
                         try {
                             var ifRecordReset = record.load({
@@ -303,20 +364,22 @@ define(['N/search', 'N/log', 'N/record', 'N/task', 'N/runtime'], function (searc
                                 enableSourcing: false,
                                 ignoreMandatoryFields: true
                             });
-                            log.debug('scheduleBatchAndAttachMR', 'Reset requested_batch_and_attach field for IF ' + tranId + ' to allow retry');
+                            log.debug('scheduleBatchAndAttachMR', 'TranID: ' + tranId + ' - Reset requested_batch_and_attach field for IF ' + tranId + ' to allow retry');
                         } catch (resetError) {
-                            log.error('scheduleBatchAndAttachMR', 'Error resetting field for IF ' + tranId + ': ' + resetError.toString());
+                            log.error('scheduleBatchAndAttachMR', 'TranID: ' + tranId + ' - Error resetting field for IF ' + tranId + ': ' + resetError.toString());
                         }
                     }
                 } catch (statusError) {
                     scheduledCount++;
-                    log.debug('scheduleBatchAndAttachMR', 'Could not check task status for ' + taskId + ', but task was submitted. Assuming success. Field already set.');
+                    log.debug('scheduleBatchAndAttachMR', 'TranID: ' + tranId + ' - Could not check task status for ' + taskId + ', but task was submitted. Assuming success.');
                 }
                 
             } catch (e) {
                 errorCount++;
                 var errorName = e.name || '';
                 var errorMessage = e.message || e.toString();
+                
+                log.error('scheduleBatchAndAttachMR', 'TranID: ' + tranId + ' - Error scheduling MR script: ' + errorMessage);
                 
                 // Reset the field so it can be retried on the next scheduled run
                 try {
@@ -333,12 +396,10 @@ define(['N/search', 'N/log', 'N/record', 'N/task', 'N/runtime'], function (searc
                         enableSourcing: false,
                         ignoreMandatoryFields: true
                     });
-                    log.debug('scheduleBatchAndAttachMR', 'Reset requested_batch_and_attach field for IF ' + tranId + ' due to submission failure - will retry on next run');
+                    log.debug('scheduleBatchAndAttachMR', 'TranID: ' + tranId + ' - Reset requested_batch_and_attach field for IF ' + tranId + ' due to submission failure - will retry on next run');
                 } catch (resetError) {
-                    log.error('scheduleBatchAndAttachMR', 'Error resetting field for IF ' + tranId + ' after submission failure: ' + resetError.toString());
+                    log.error('scheduleBatchAndAttachMR', 'TranID: ' + tranId + ' - Error resetting field for IF ' + tranId + ' after submission failure: ' + resetError.toString());
                 }
-                
-                log.error('scheduleBatchAndAttachMR', 'Error scheduling MR script for IF ' + tranId + ' (ID: ' + ifId + '): ' + e.toString());
             }
         });
         
