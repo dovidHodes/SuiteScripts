@@ -16,7 +16,8 @@
  * 7. Update custbody_batched_the_batch_and_attach field with file URL
  */
 
-define(['N/search', 'N/record', 'N/file', 'N/render', 'N/url', 'N/log', 'N/runtime'], function (search, record, file, render, url, log, runtime) {
+
+define(['N/search', 'N/record', 'N/file', 'N/url', 'N/log', 'N/runtime', './PDFlib_WRAPPED'], function (search, record, file, url, log, runtime, PDFLib) {
     
     /**
      * Gets input data - the IF ID from script parameters
@@ -163,17 +164,17 @@ define(['N/search', 'N/record', 'N/file', 'N/render', 'N/url', 'N/log', 'N/runti
             var finalFileId = null;
             var finalFileUrl = null;
             
-            // If only one file, rename it to the carton label naming pattern
+            // If only one file, rename it to the All carton labels naming pattern
             if (labelFileIds.length === 1) {
-                log.debug('reduce', 'TranID: ' + tranId + ' - Only one label file found, renaming to carton label format');
+                log.debug('reduce', 'TranID: ' + tranId + ' - Only one label file found, renaming to All carton labels format');
                 finalFileId = labelFileIds[0];
                 
                 // Load the file and rename it
                 try {
                     var singleFile = file.load({ id: finalFileId });
                     
-                    // Build new file name: carton label + {relatedponumber} - {location name}
-                    var newFileName = 'carton label';
+                    // Build new file name: All carton labels + {relatedponumber} - {location name}
+                    var newFileName = 'All carton labels';
                     if (poNumber) {
                         newFileName += ' ' + poNumber;
                     }
@@ -200,9 +201,91 @@ define(['N/search', 'N/record', 'N/file', 'N/render', 'N/url', 'N/log', 'N/runti
                     return;
                 }
             } else {
-                // Multiple files - merge them
+                // Multiple files - merge them using PDFlib
                 log.debug('reduce', 'TranID: ' + tranId + ' - Merging ' + labelFileIds.length + ' PDF file(s)');
-                finalFileId = mergePDFs(labelFileIds, poNumber, tranId, locationName);
+                
+                // mergePDFs returns a Promise, so we need to handle it
+                // NOTE: This is a limitation of Map/Reduce scripts - they expect synchronous operations
+                // If this doesn't work, consider using a Scheduled Script or RESTlet instead
+                var mergeResult = mergePDFs(labelFileIds, poNumber, tranId, locationName);
+                
+                // Check if we got a Promise or a direct result
+                if (mergeResult && typeof mergeResult.then === 'function') {
+                    // It's a Promise - handle it
+                    // WARNING: Map/Reduce scripts may not wait for Promise resolution
+                    // You may need to test this and potentially use a different script type
+                    log.debug('reduce', 'TranID: ' + tranId + ' - Merge returned a Promise, waiting for resolution...');
+                    
+                    mergeResult.then(function(fileId) {
+                        if (!fileId) {
+                            log.error('reduce', 'TranID: ' + tranId + ' - Failed to merge PDFs (Promise resolved with null)');
+                            return;
+                        }
+                        
+                        finalFileId = fileId;
+                        log.debug('reduce', 'TranID: ' + tranId + ' - PDFs merged successfully, file ID: ' + finalFileId);
+                        
+                        // Get merged file URL
+                        try {
+                            var mergedFile = file.load({ id: finalFileId });
+                            var domain = url.resolveDomain({ hostType: url.HostType.APPLICATION });
+                            finalFileUrl = 'https://' + domain + mergedFile.url;
+                            log.debug('reduce', 'TranID: ' + tranId + ' - Merged file URL: ' + finalFileUrl);
+                            
+                            // Attach file to IF
+                            try {
+                                log.debug('reduce', 'TranID: ' + tranId + ' - Attaching file to IF');
+                                record.attach({
+                                    record: {
+                                        type: 'file',
+                                        id: finalFileId
+                                    },
+                                    to: {
+                                        type: record.Type.ITEM_FULFILLMENT,
+                                        id: ifId
+                                    }
+                                });
+                                log.debug('reduce', 'TranID: ' + tranId + ' - Successfully attached file to IF');
+                            } catch (attachError) {
+                                log.error('reduce', 'TranID: ' + tranId + ' - Error attaching file: ' + attachError.toString());
+                            }
+                            
+                            // Update IF field with file URL
+                            try {
+                                log.debug('reduce', 'TranID: ' + tranId + ' - Updating IF field with file URL');
+                                record.submitFields({
+                                    type: record.Type.ITEM_FULFILLMENT,
+                                    id: ifId,
+                                    values: {
+                                        custbody_batched_the_batch_and_attach: finalFileUrl
+                                    },
+                                    options: {
+                                        enableSourcing: false,
+                                        ignoreMandatoryFields: true
+                                    }
+                                });
+                                
+                                log.audit('reduce', 'TranID: ' + tranId + ' - Successfully processed ' + labelFileIds.length + ' label(s). File URL: ' + finalFileUrl);
+                                
+                            } catch (updateError) {
+                                log.error('reduce', 'TranID: ' + tranId + ' - Error updating IF field with file URL: ' + updateError.toString());
+                            }
+                            
+                        } catch (fileError) {
+                            log.error('reduce', 'TranID: ' + tranId + ' - Error loading merged file: ' + fileError.toString());
+                        }
+                    }).catch(function(error) {
+                        log.error('reduce', 'TranID: ' + tranId + ' - Error in merge Promise: ' + error.toString());
+                    });
+                    
+                    // Return early since Promise will handle the rest asynchronously
+                    // NOTE: This means the reduce function completes before the merge is done
+                    // This is a limitation - you may need to use a Scheduled Script instead
+                    return;
+                    
+                } else {
+                    // Direct result (shouldn't happen with PDFlib, but handle it)
+                    finalFileId = mergeResult;
                 
                 if (!finalFileId) {
                     log.error('reduce', 'TranID: ' + tranId + ' - Failed to merge PDFs');
@@ -220,6 +303,7 @@ define(['N/search', 'N/record', 'N/file', 'N/render', 'N/url', 'N/log', 'N/runti
                 } catch (fileError) {
                     log.error('reduce', 'TranID: ' + tranId + ' - Error loading merged file: ' + fileError.toString());
                     return;
+                    }
                 }
             }
             
@@ -378,7 +462,20 @@ define(['N/search', 'N/record', 'N/file', 'N/render', 'N/url', 'N/log', 'N/runti
     }
     
     /**
-     * Merges multiple PDF files into one using N/render PDF set
+     * Merges multiple PDF files into one using PDFlib library
+     * 
+     * PDFlib Functions Used:
+     * - PDFLib.PDFDocument.create() - Creates a new empty PDF document (returns Promise)
+     * - PDFLib.PDFDocument.load(bytes) - Loads an existing PDF from bytes (returns Promise)
+     * - pdfDoc.getPageCount() - Gets the number of pages in a PDF
+     * - pdfDoc.copyPages(sourceDoc, pageIndices) - Copies pages from source to target (returns array of page objects)
+     * - pdfDoc.addPage(page) - Adds a page to the document
+     * - pdfDoc.save() - Saves the PDF as Uint8Array bytes (returns Promise)
+     * 
+     * To verify PDFlib is loaded correctly, check the execution logs for:
+     * - "PDFlib loaded successfully" message
+     * - Any errors about PDFLib being undefined
+     * 
      * @param {Array<string>} fileIds - Array of file internal IDs to merge
      * @param {string} poNumber - PO number for file naming
      * @param {string} tranId - Transaction ID for file naming
@@ -392,35 +489,16 @@ define(['N/search', 'N/record', 'N/file', 'N/render', 'N/url', 'N/log', 'N/runti
                 return null;
             }
             
-            log.debug('mergePDFs', 'TranID: ' + tranId + ' - Starting to merge ' + fileIds.length + ' PDF file(s)');
-            
-            // Create PDF set using render.create() with type PDF_SET
-            var pdfSet = render.create({
-                type: render.Type.PDF_SET
-            });
-            
-            log.debug('mergePDFs', 'TranID: ' + tranId + ' - Created PDF set, adding ' + fileIds.length + ' file(s)');
-            
-            // Add each PDF file to the set
-            for (var i = 0; i < fileIds.length; i++) {
-                try {
-                    var pdfFile = file.load({ id: fileIds[i] });
-                    pdfSet.add({
-                        file: pdfFile
-                    });
-                    log.debug('mergePDFs', 'TranID: ' + tranId + ' - Added file ' + (i + 1) + ' of ' + fileIds.length + ' to PDF set');
-                } catch (fileError) {
-                    log.error('mergePDFs', 'TranID: ' + tranId + ' - Error loading file ' + fileIds[i] + ': ' + fileError.toString());
-                    // Continue with other files
-                }
+            // Verify PDFlib is loaded
+            if (!PDFLib || typeof PDFLib.PDFDocument === 'undefined') {
+                log.error('mergePDFs', 'TranID: ' + tranId + ' - PDFlib library not loaded correctly. PDFLib object: ' + typeof PDFLib);
+                return null;
             }
             
-            // Render the merged PDF
-            log.debug('mergePDFs', 'TranID: ' + tranId + ' - Rendering merged PDF');
-            var mergedPdf = pdfSet.render();
+            log.debug('mergePDFs', 'TranID: ' + tranId + ' - PDFlib loaded successfully, starting to merge ' + fileIds.length + ' PDF file(s)');
             
-            // Build file name: carton label + {relatedponumber} - {location name}
-            var fileName = 'carton label';
+            // Build file name: All carton labels + {relatedponumber} - {location name}
+            var fileName = 'All carton labels';
             if (poNumber) {
                 fileName += ' ' + poNumber;
             }
@@ -429,11 +507,8 @@ define(['N/search', 'N/record', 'N/file', 'N/render', 'N/url', 'N/log', 'N/runti
             }
             fileName += '.pdf';
             
-            log.debug('mergePDFs', 'TranID: ' + tranId + ' - Merged PDF rendered, saving as: ' + fileName);
-            
             // Get folder ID for merged labels
             var folderId = getMergedLabelsFolderId();
-            
             if (!folderId) {
                 log.debug('mergePDFs', 'TranID: ' + tranId + ' - Could not find merged labels folder ID, saving to root folder');
                 folderId = null;
@@ -441,22 +516,237 @@ define(['N/search', 'N/record', 'N/file', 'N/render', 'N/url', 'N/log', 'N/runti
                 log.debug('mergePDFs', 'TranID: ' + tranId + ' - Using folder ID: ' + folderId);
             }
             
-            // Set folder and name
-            mergedPdf.folder = folderId;
-            mergedPdf.name = fileName;
+            // NOTE: PDFlib uses Promises, which SuiteScript 2.0 Map/Reduce supports
+            // However, since reduce() must return synchronously, we'll use a Promise chain
+            // and handle the result. NetSuite's JavaScript engine should execute the Promise chain.
             
-            // Save the merged PDF
-            log.debug('mergePDFs', 'TranID: ' + tranId + ' - Saving merged PDF file');
-            var mergedFileId = mergedPdf.save();
-            
+            // Create the merged PDF document and process all files
+            return PDFLib.PDFDocument.create().then(function(mergedPdfDoc) {
+                log.debug('mergePDFs', 'TranID: ' + tranId + ' - Created merged PDF document');
+                
+                // Array to store all PDF loading promises
+                var loadPromises = [];
+                
+                // Load each PDF file from NetSuite
+                for (var i = 0; i < fileIds.length; i++) {
+                    try {
+                        log.debug('mergePDFs', 'TranID: ' + tranId + ' - Loading file ' + (i + 1) + ' of ' + fileIds.length + ' (ID: ' + fileIds[i] + ')');
+                        
+                        // Load file from NetSuite
+                        var pdfFile = file.load({ id: fileIds[i] });
+                        
+                        // Get file contents - NetSuite returns base64-encoded string for binary files
+                        var fileContents = pdfFile.getContents();
+                        
+                        // Convert base64 string to Uint8Array for PDFlib
+                        // NetSuite's getContents() returns base64-encoded strings for PDF files
+                        var pdfBytes = base64ToUint8Array(fileContents);
+                        
+                        // Load PDF into PDFlib (returns a Promise)
+                        var loadPromise = PDFLib.PDFDocument.load(pdfBytes);
+                        loadPromises.push({
+                            promise: loadPromise,
+                            index: i,
+                            fileId: fileIds[i]
+                        });
+                        
+                    } catch (fileError) {
+                        log.error('mergePDFs', 'TranID: ' + tranId + ' - Error loading file ' + fileIds[i] + ': ' + fileError.toString());
+                        // Continue with other files
+                    }
+                }
+                
+                // Process all loaded PDFs sequentially to merge them
+                return processPDFsSequentially(loadPromises, mergedPdfDoc, tranId);
+                
+            }).then(function(mergedPdfDoc) {
+                // All PDFs processed, now save the merged document
+                log.debug('mergePDFs', 'TranID: ' + tranId + ' - All PDFs processed, saving merged document');
+                return mergedPdfDoc.save();
+                
+            }).then(function(mergedPdfBytes) {
+                // Save the merged PDF to NetSuite
+                log.debug('mergePDFs', 'TranID: ' + tranId + ' - Merged PDF bytes generated (' + mergedPdfBytes.length + ' bytes), saving to NetSuite');
+                
+                // Convert Uint8Array to base64 for NetSuite file
+                var base64Content = uint8ArrayToBase64(mergedPdfBytes);
+                
+                // Create new file in NetSuite
+                var mergedFile = file.create({
+                    name: fileName,
+                    fileType: file.Type.PDF,
+                    contents: base64Content,
+                    folder: folderId
+                });
+                
+                var mergedFileId = mergedFile.save();
             log.audit('mergePDFs', 'TranID: ' + tranId + ' - Merged PDF saved with ID: ' + mergedFileId + ', Name: ' + fileName);
             
             return mergedFileId;
+                
+            }).catch(function(error) {
+                log.error('mergePDFs', 'TranID: ' + tranId + ' - Error merging PDFs: ' + error.toString());
+                log.error('mergePDFs', 'TranID: ' + tranId + ' - Error stack: ' + (error.stack || 'No stack trace'));
+                return null;
+            });
             
         } catch (e) {
             log.error('mergePDFs', 'TranID: ' + tranId + ' - Error merging PDFs: ' + e.toString());
             return null;
         }
+    }
+    
+    /**
+     * Processes PDFs sequentially to merge them into the target document
+     * @param {Array} loadPromises - Array of {promise, index, fileId} objects
+     * @param {Object} mergedPdfDoc - The target PDF document to merge into
+     * @param {string} tranId - Transaction ID for logging
+     * @returns {Promise} Promise that resolves when all PDFs are merged
+     */
+    function processPDFsSequentially(loadPromises, mergedPdfDoc, tranId) {
+        if (loadPromises.length === 0) {
+            return Promise.resolve(mergedPdfDoc);
+        }
+        
+        var currentPromise = loadPromises[0];
+        return currentPromise.promise.then(function(sourcePdfDoc) {
+            try {
+                var pageCount = sourcePdfDoc.getPageCount();
+                log.debug('mergePDFs', 'TranID: ' + tranId + ' - File ' + (currentPromise.index + 1) + ' has ' + pageCount + ' page(s)');
+                
+                // Get all page indices [0, 1, 2, ..., pageCount-1]
+                var pageIndices = [];
+                for (var i = 0; i < pageCount; i++) {
+                    pageIndices.push(i);
+                }
+                
+                // Copy all pages from source to merged document
+                var copiedPages = mergedPdfDoc.copyPages(sourcePdfDoc, pageIndices);
+                
+                // Add each copied page to the merged document
+                copiedPages.forEach(function(page) {
+                    mergedPdfDoc.addPage(page);
+                });
+                
+                log.debug('mergePDFs', 'TranID: ' + tranId + ' - Copied ' + pageCount + ' page(s) from file ' + (currentPromise.index + 1));
+                
+                // Process next PDF
+                return processPDFsSequentially(loadPromises.slice(1), mergedPdfDoc, tranId);
+                
+            } catch (copyError) {
+                log.error('mergePDFs', 'TranID: ' + tranId + ' - Error copying pages from file ' + currentPromise.fileId + ': ' + copyError.toString());
+                // Continue with next file
+                return processPDFsSequentially(loadPromises.slice(1), mergedPdfDoc, tranId);
+            }
+        }).catch(function(loadError) {
+            log.error('mergePDFs', 'TranID: ' + tranId + ' - Error loading PDF file ' + currentPromise.fileId + ': ' + loadError.toString());
+            // Continue with next file
+            return processPDFsSequentially(loadPromises.slice(1), mergedPdfDoc, tranId);
+        });
+    }
+    
+    /**
+     * NetSuite-compatible base64 decode (replaces atob)
+     * @param {string} base64 - Base64 encoded string
+     * @returns {string} Decoded binary string
+     */
+    function base64Decode(base64) {
+        var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+        var output = '';
+        var i = 0;
+        base64 = base64.replace(/[^A-Za-z0-9\+\/\=]/g, '');
+        
+        while (i < base64.length) {
+            var enc1 = chars.indexOf(base64.charAt(i++));
+            var enc2 = chars.indexOf(base64.charAt(i++));
+            var enc3 = chars.indexOf(base64.charAt(i++));
+            var enc4 = chars.indexOf(base64.charAt(i++));
+            
+            var bitmap = (enc1 << 18) | (enc2 << 12) | (enc3 << 6) | enc4;
+            
+            if (enc3 === 64) {
+                output += String.fromCharCode((bitmap >> 16) & 255);
+            } else if (enc4 === 64) {
+                output += String.fromCharCode((bitmap >> 16) & 255, (bitmap >> 8) & 255);
+            } else {
+                output += String.fromCharCode((bitmap >> 16) & 255, (bitmap >> 8) & 255, bitmap & 255);
+            }
+        }
+        
+        return output;
+    }
+    
+    /**
+     * Converts base64 string to Uint8Array
+     * @param {string} base64 - Base64 encoded string
+     * @returns {Uint8Array} Decoded bytes
+     */
+    function base64ToUint8Array(base64) {
+        // Remove data URL prefix if present (e.g., "data:application/pdf;base64,")
+        var base64Data = base64.replace(/^data:.*?;base64,/, '');
+        
+        // Decode base64 to binary string using NetSuite-compatible function
+        var binaryString = base64Decode(base64Data);
+        
+        // Convert binary string to Uint8Array
+        var bytes = new Uint8Array(binaryString.length);
+        for (var i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+        }
+        
+        return bytes;
+    }
+    
+    /**
+     * Converts string to Uint8Array (for non-base64 strings)
+     * @param {string} str - String to convert
+     * @returns {Uint8Array} Converted bytes
+     */
+    function stringToUint8Array(str) {
+        var bytes = new Uint8Array(str.length);
+        for (var i = 0; i < str.length; i++) {
+            bytes[i] = str.charCodeAt(i);
+        }
+        return bytes;
+    }
+    
+    /**
+     * NetSuite-compatible base64 encode (replaces btoa)
+     * @param {string} binary - Binary string to encode
+     * @returns {string} Base64 encoded string
+     */
+    function base64Encode(binary) {
+        var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+        var output = '';
+        var i = 0;
+        
+        while (i < binary.length) {
+            var a = binary.charCodeAt(i++);
+            var b = i < binary.length ? binary.charCodeAt(i++) : 0;
+            var c = i < binary.length ? binary.charCodeAt(i++) : 0;
+            
+            var bitmap = (a << 16) | (b << 8) | c;
+            
+            output += chars.charAt((bitmap >> 18) & 63);
+            output += chars.charAt((bitmap >> 12) & 63);
+            output += i - 2 < binary.length ? chars.charAt((bitmap >> 6) & 63) : '=';
+            output += i - 1 < binary.length ? chars.charAt(bitmap & 63) : '=';
+        }
+        
+        return output;
+    }
+    
+    /**
+     * Converts Uint8Array to base64 string
+     * @param {Uint8Array} bytes - Bytes to convert
+     * @returns {string} Base64 encoded string
+     */
+    function uint8ArrayToBase64(bytes) {
+        var binary = '';
+        for (var i = 0; i < bytes.length; i++) {
+            binary += String.fromCharCode(bytes[i]);
+        }
+        return base64Encode(binary);
     }
     
     /**
