@@ -15,6 +15,10 @@ NetSuite automation scripts and utilities for EDI processing, invoice management
     │   ├── Batch print labels/         # Batch label printing and merging
     │   ├── BOL/                        # Bill of Lading generation
     │   ├── Create IFs/                 # Item Fulfillment creation automation
+    │   ├── delete/                     # Package deletion diagnostic tools
+    │   ├── Packing_List/               # Packing slip PDF templates
+    │   ├── Set routing info AVC library code/  # Routing calculation library
+    │   ├── Set routing info AVC UE/    # Routing User Event script
     │   ├── SPS Scripts/                # SPS Commerce integration scripts
     │   │   ├── Autopack/               # SPS autopack functionality
     │   │   ├── Batch print/            # SPS batch label printing
@@ -22,7 +26,9 @@ NetSuite automation scripts and utilities for EDI processing, invoice management
     │   └── time tracker/               # Time tracking library and documentation
     └── AGA/                            # AGA customer-specific scripts
         ├── Approve EDI button/         # EDI approval button functionality
+        ├── PGA Department Validation/ # PGA department validation User Event
         ├── reconcilePackages/          # Package reconciliation scripts
+        ├── deletePackages.js           # Package deletion script
         ├── retrieve_and_attach_PODs.js # FedEx POD document retrieval
         ├── setIFasReadyToSend.js       # Set Item Fulfillments as ready to send
         ├── setInvoiceAsReadyToSend.js  # Auto-approve invoices for EDI transmission
@@ -84,6 +90,69 @@ Automated approval of AVC (Amazon Vendor Central) orders with warehouse-specific
 
 **Files:**
 - `setAndApproveAVCOrders.js` - User Event script for order approval
+
+### Auto Pack IFs
+Automated packing of Item Fulfillments using SPS Commerce integration.
+
+**Key Features:**
+- Automated discovery of IFs needing packing
+- SPS Commerce integration for autopack
+- Entity-based processing (only entities with `custentity_auto_create_packages = true`)
+- Time tracking integration
+
+**Files:**
+- `autopackScheduled.js` - Scheduled script to find IFs and schedule SPS autopack
+- `sps_mr_auto_pack_2x_custom.js` - Custom SPS autopack Map/Reduce script
+
+### Create IFs
+Automated creation of Item Fulfillments from Sales Orders grouped by location.
+
+**Key Features:**
+- Automatic IF creation from Sales Orders
+- Location-based grouping
+- Entity-based processing (only entities with `custentity_auto_create_ifs = true`)
+- Routing integration
+- Time tracking integration
+
+**Files:**
+- `autoIF.js` - Map/Reduce script for automated IF creation
+
+### Set Routing Info AVC
+Automated calculation and application of Amazon Vendor Central routing information to Item Fulfillments.
+
+**Key Features:**
+- Centralized routing calculation library
+- Automatic routing field updates
+- Pickup date calculation
+- Entity-specific (entity 1716 only)
+- Time tracking integration
+
+**Files:**
+- `Set routing info AVC library code/_dsh_lib_routing_calculator.js` - Reusable routing library
+- `Set routing info AVC UE/setAVCroutingIF_UE.js` - User Event script for automatic routing
+
+### Packing List
+Advanced PDF/HTML templates for generating packing slip documents.
+
+**Key Features:**
+- Print-ready PDF templates
+- Customizable XML-based templates
+- Data binding from Item Fulfillment records
+
+**Files:**
+- `packing_slip_template_original.xml` - Original packing slip template
+- `packing_slip_template_with_rick_roll.xml` - Modified template with custom content
+
+### Delete Packages
+Diagnostic tools for checking package deletion dependencies and issues.
+
+**Key Features:**
+- Comprehensive dependency checking
+- User Event script detection
+- Performance analysis
+
+**Files:**
+- `checkPackageDependencies.js` - Diagnostic script for package deletion blockers
 
 ### Time Tracker
 Centralized time tracking system for measuring automation savings.
@@ -176,12 +245,29 @@ Scheduled script that processes packages from a saved search and calls the POD r
 #### Required Script Parameters
 • `custscript_saved_search_id`: ID of saved search containing packages to process
 
+### PGA Department Validation
+User Event script that validates department information on transactions for PGA (Professional Golfers' Association) compliance.
+
+**Key Features:**
+- Department validation on transaction records
+- Email notifications for validation issues
+- Record link generation for error reporting
+
+**Files:**
+- `aga_ue_department_validation.js` - User Event script for department validation
+
+### deletePackages.js
+Script for deleting package records (diagnostic/utility script).
+
+**Files:**
+- `deletePackages.js` - Package deletion utility
 
 ## Documentation
 
 - **NetSuite_Troubleshooting_Memories.md**: Comprehensive troubleshooting guide with lessons learned from NetSuite development
-- **EDI_Error_Record_Reference.md**: Reference for EDI error record structure and usage patterns
+- **scripts/AGA/EDI_Error_Record_Reference.md**: Reference for EDI error record structure and usage patterns
 - **scripts/Jool/BOL/README.md**: Detailed BOL generation documentation
+- **scripts/Jool/BOL/BOL_PROCESS_OVERVIEW.md**: BOL process overview and integration details
 - **scripts/Jool/time tracker/TIME_TRACKER.md**: Complete time tracker implementation and usage guide
 
 ## Getting Started
