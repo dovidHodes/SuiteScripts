@@ -3,21 +3,159 @@
  * @NScriptType MapReduceScript
  * @NModuleScope SameAccount
  * 
- * Map/Reduce script that merges all SPS batch print label PDFs for an Item Fulfillment
- * into a single PDF file.
+ * This Map/Reduce script consolidates all SPS batch print label PDFs associated with an Item Fulfillment into a single PDF file.
  * 
  * Process:
- * 1. Get IF ID from parameters
- * 2. Find all SPS label PDF files attached to the IF
- * 3. Merge them using N/render PDF set
- * 4. Save merged PDF with name: {poname}_{IFname}_MERGED LABELS.pdf
- * 5. Save to specified folder
- * 6. Attach merged PDF to IF
- * 7. Update custbody_batched_the_batch_and_attach field with file URL
+ * 1. Retrieve the Item Fulfillment ID from the provided parameters.
+ * 2. Locate all SPS label PDF files attached to the identified Item Fulfillment.
+ * 3. Merge the retrieved PDFs using the N/render PDF module.
+ * 4. Save the merged PDF with the filename format: {poname}_{IFname}_MERGED LABELS.pdf.
+ * 5. Store the merged PDF in the designated folder.
+ * 6. Attach the newly created merged PDF to the corresponding Item Fulfillment record.
+ * 7. Update the custbody_batched_the_batch_and_attach field with the URL of the merged PDF file.
  */
 
+// Polyfill for btoa and atob (browser APIs not available in NetSuite)
+// These MUST be defined BEFORE the define() call so PDFlib can access them
+// Define them in global scope for PDFlib to access
 
-define(['N/search', 'N/record', 'N/file', 'N/url', 'N/log', 'N/runtime', './PDFlib_WRAPPED'], function (search, record, file, url, log, runtime, PDFLib) {
+/**
+ * NetSuite-compatible base64 encode (polyfill for btoa)
+ * @param {string} binary - Binary string to encode
+ * @returns {string} Base64 encoded string
+ */
+function base64EncodePolyfill(binary) {
+    var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+    var output = '';
+    var i = 0;
+    
+    while (i < binary.length) {
+        var a = binary.charCodeAt(i++);
+        var b = i < binary.length ? binary.charCodeAt(i++) : 0;
+        var c = i < binary.length ? binary.charCodeAt(i++) : 0;
+        
+        var bitmap = (a << 16) | (b << 8) | c;
+        
+        output += chars.charAt((bitmap >> 18) & 63);
+        output += chars.charAt((bitmap >> 12) & 63);
+        output += i - 2 < binary.length ? chars.charAt((bitmap >> 6) & 63) : '=';
+        output += i - 1 < binary.length ? chars.charAt(bitmap & 63) : '=';
+    }
+    
+    return output;
+}
+
+/**
+ * NetSuite-compatible base64 decode (polyfill for atob)
+ * @param {string} base64 - Base64 encoded string
+ * @returns {string} Decoded binary string
+ */
+function base64DecodePolyfill(base64) {
+    var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+    var output = '';
+    var i = 0;
+    base64 = base64.replace(/[^A-Za-z0-9\+\/\=]/g, '');
+    
+    while (i < base64.length) {
+        var enc1 = chars.indexOf(base64.charAt(i++));
+        var enc2 = chars.indexOf(base64.charAt(i++));
+        var enc3 = chars.indexOf(base64.charAt(i++));
+        var enc4 = chars.indexOf(base64.charAt(i++));
+        
+        var bitmap = (enc1 << 18) | (enc2 << 12) | (enc3 << 6) | enc4;
+        
+        if (enc3 === 64) {
+            output += String.fromCharCode((bitmap >> 16) & 255);
+        } else if (enc4 === 64) {
+            output += String.fromCharCode((bitmap >> 16) & 255, (bitmap >> 8) & 255);
+        } else {
+            output += String.fromCharCode((bitmap >> 16) & 255, (bitmap >> 8) & 255, bitmap & 255);
+        }
+    }
+    
+    return output;
+}
+
+// Assign to global scope - try multiple methods for compatibility with NetSuite
+if (typeof global !== 'undefined') {
+    global.btoa = base64EncodePolyfill;
+    global.atob = base64DecodePolyfill;
+} else if (typeof window !== 'undefined') {
+    window.btoa = base64EncodePolyfill;
+    window.atob = base64DecodePolyfill;
+} else {
+    // In SuiteScript, assign without var to make them global
+    // This creates properties on the global object
+    btoa = base64EncodePolyfill;
+    atob = base64DecodePolyfill;
+}
+
+define(['N/search', 'N/record', 'N/file', 'N/url', 'N/log', 'N/runtime', './PDFlib_WRAPPED', './_dsh_lib_time_tracker'], function (search, record, file, url, log, runtime, PDFLib, timeTrackerLib) {
+    
+    // Re-assign polyfills in module scope as well, in case PDFlib accesses them from here
+    // Also define helper functions for use within this module
+    /**
+     * NetSuite-compatible base64 encode (polyfill for btoa)
+     * @param {string} binary - Binary string to encode
+     * @returns {string} Base64 encoded string
+     */
+    function base64EncodePolyfill(binary) {
+        var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+        var output = '';
+        var i = 0;
+        
+        while (i < binary.length) {
+            var a = binary.charCodeAt(i++);
+            var b = i < binary.length ? binary.charCodeAt(i++) : 0;
+            var c = i < binary.length ? binary.charCodeAt(i++) : 0;
+            
+            var bitmap = (a << 16) | (b << 8) | c;
+            
+            output += chars.charAt((bitmap >> 18) & 63);
+            output += chars.charAt((bitmap >> 12) & 63);
+            output += i - 2 < binary.length ? chars.charAt((bitmap >> 6) & 63) : '=';
+            output += i - 1 < binary.length ? chars.charAt(bitmap & 63) : '=';
+        }
+        
+        return output;
+    }
+    
+    /**
+     * NetSuite-compatible base64 decode (polyfill for atob)
+     * @param {string} base64 - Base64 encoded string
+     * @returns {string} Decoded binary string
+     */
+    function base64DecodePolyfill(base64) {
+        var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+        var output = '';
+        var i = 0;
+        base64 = base64.replace(/[^A-Za-z0-9\+\/\=]/g, '');
+        
+        while (i < base64.length) {
+            var enc1 = chars.indexOf(base64.charAt(i++));
+            var enc2 = chars.indexOf(base64.charAt(i++));
+            var enc3 = chars.indexOf(base64.charAt(i++));
+            var enc4 = chars.indexOf(base64.charAt(i++));
+            
+            var bitmap = (enc1 << 18) | (enc2 << 12) | (enc3 << 6) | enc4;
+            
+            if (enc3 === 64) {
+                output += String.fromCharCode((bitmap >> 16) & 255);
+            } else if (enc4 === 64) {
+                output += String.fromCharCode((bitmap >> 16) & 255, (bitmap >> 8) & 255);
+            } else {
+                output += String.fromCharCode((bitmap >> 16) & 255, (bitmap >> 8) & 255, bitmap & 255);
+            }
+        }
+        
+        return output;
+    }
+    
+    // Ensure they're available globally (re-assign in case the pre-define assignment didn't work)
+    if (typeof global !== 'undefined') {
+        global.btoa = base64EncodePolyfill;
+        global.atob = base64DecodePolyfill;
+    }
     
     /**
      * Gets input data - the IF ID from script parameters
@@ -131,6 +269,7 @@ define(['N/search', 'N/record', 'N/file', 'N/url', 'N/log', 'N/runtime', './PDFl
             var tranId = ifRecord.getValue('tranid') || ifId;
             var poNumber = ifRecord.getValue('custbody_sps_ponum_from_salesorder') || '';
             var ifCreatedDate = ifRecord.getValue('createddate');
+            var entityId = ifRecord.getValue('entity'); // Customer ID for time tracker
             
             // Get location name
             var locationName = '';
@@ -267,6 +406,27 @@ define(['N/search', 'N/record', 'N/file', 'N/url', 'N/log', 'N/runtime', './PDFl
                                 
                                 log.audit('reduce', 'TranID: ' + tranId + ' - Successfully processed ' + labelFileIds.length + ' label(s). File URL: ' + finalFileUrl);
                                 
+                                // Add time tracker line for merging labels
+                                // Action ID 7 - Employee 5
+                                // Time saved: 5 seconds per original SPS label
+                                try {
+                                    if (entityId) {
+                                        var timeSaved = labelFileIds.length * 5; // 5 seconds per original SPS label
+                                        timeTrackerLib.addTimeTrackerLine({
+                                            actionId: 7, // Action internal ID 7
+                                            customerId: entityId,
+                                            timeSaved: timeSaved,
+                                            employeeId: 5
+                                        });
+                                        log.debug('Time Tracker - Merge Labels', 'Added time tracker line for employee 5, action 7, IF: ' + tranId + ', time saved: ' + timeSaved + ' seconds (' + labelFileIds.length + ' labels)');
+                                    } else {
+                                        log.debug('Time Tracker', 'Skipping time tracker - no customer ID found on IF: ' + tranId);
+                                    }
+                                } catch (timeTrackerError) {
+                                    // Log error but don't fail the merge
+                                    log.error('Time Tracker Error - Merge Labels', 'Failed to add time tracker line for IF ' + tranId + ': ' + timeTrackerError.toString());
+                                }
+                                
                             } catch (updateError) {
                                 log.error('reduce', 'TranID: ' + tranId + ' - Error updating IF field with file URL: ' + updateError.toString());
                             }
@@ -341,6 +501,27 @@ define(['N/search', 'N/record', 'N/file', 'N/url', 'N/log', 'N/runtime', './PDFl
                 });
                 
                 log.audit('reduce', 'TranID: ' + tranId + ' - Successfully processed ' + labelFileIds.length + ' label(s). File URL: ' + finalFileUrl);
+                
+                // Add time tracker line for merging labels (single file rename case)
+                // Action ID 7 - Employee 5
+                // Time saved: 5 seconds per original SPS label
+                try {
+                    if (entityId) {
+                        var timeSaved = labelFileIds.length * 5; // 5 seconds per original SPS label
+                        timeTrackerLib.addTimeTrackerLine({
+                            actionId: 7, // Action internal ID 7
+                            customerId: entityId,
+                            timeSaved: timeSaved,
+                            employeeId: 5
+                        });
+                        log.debug('Time Tracker - Merge Labels', 'Added time tracker line for employee 5, action 7, IF: ' + tranId + ', time saved: ' + timeSaved + ' seconds (' + labelFileIds.length + ' label)');
+                    } else {
+                        log.debug('Time Tracker', 'Skipping time tracker - no customer ID found on IF: ' + tranId);
+                    }
+                } catch (timeTrackerError) {
+                    // Log error but don't fail the process
+                    log.error('Time Tracker Error - Merge Labels', 'Failed to add time tracker line for IF ' + tranId + ': ' + timeTrackerError.toString());
+                }
                 
             } catch (updateError) {
                 log.error('reduce', 'TranID: ' + tranId + ' - Error updating IF field with file URL: ' + updateError.toString());
@@ -538,9 +719,15 @@ define(['N/search', 'N/record', 'N/file', 'N/url', 'N/log', 'N/runtime', './PDFl
                         // Get file contents - NetSuite returns base64-encoded string for binary files
                         var fileContents = pdfFile.getContents();
                         
+                        // Debug: Log file contents info
+                        log.debug('mergePDFs', 'TranID: ' + tranId + ' - File ' + (i + 1) + ' contents type: ' + typeof fileContents + ', length: ' + (fileContents ? fileContents.length : 0));
+                        
                         // Convert base64 string to Uint8Array for PDFlib
                         // NetSuite's getContents() returns base64-encoded strings for PDF files
                         var pdfBytes = base64ToUint8Array(fileContents);
+                        
+                        // Debug: Log converted bytes info
+                        log.debug('mergePDFs', 'TranID: ' + tranId + ' - File ' + (i + 1) + ' converted to Uint8Array, length: ' + pdfBytes.length);
                         
                         // Load PDF into PDFlib (returns a Promise)
                         var loadPromise = PDFLib.PDFDocument.load(pdfBytes);
@@ -597,6 +784,66 @@ define(['N/search', 'N/record', 'N/file', 'N/url', 'N/log', 'N/runtime', './PDFl
     }
     
     /**
+     * Adds pages from copyPages result to the merged document
+     * @param {*} copiedPages - Result from copyPages (could be array, object, etc.)
+     * @param {Object} mergedPdfDoc - The target PDF document to merge into
+     * @param {string} tranId - Transaction ID for logging
+     * @param {number} fileIndex - File index for logging
+     * @returns {Promise} Promise that resolves when pages are added
+     */
+    function addPagesToDocument(copiedPages, mergedPdfDoc, tranId, fileIndex) {
+        // Handle different return types from copyPages
+        var pagesToAdd = [];
+        
+        if (Array.isArray(copiedPages)) {
+            // Standard case: array of page objects
+            pagesToAdd = copiedPages;
+        } else if (copiedPages && typeof copiedPages.length !== 'undefined') {
+            // Array-like object - convert to array
+            for (var j = 0; j < copiedPages.length; j++) {
+                if (copiedPages[j] !== undefined && copiedPages[j] !== null) {
+                    pagesToAdd.push(copiedPages[j]);
+                }
+            }
+        } else if (copiedPages) {
+            // Single object - wrap in array
+            pagesToAdd = [copiedPages];
+        } else {
+            log.error('mergePDFs', 'TranID: ' + tranId + ' - copyPages returned null/undefined');
+            return Promise.reject(new Error('copyPages returned null/undefined'));
+        }
+        
+        log.debug('mergePDFs', 'TranID: ' + tranId + ' - Extracted ' + pagesToAdd.length + ' page(s) from copyPages result');
+        
+        // Add each copied page to the merged document
+        var addedCount = 0;
+        for (var k = 0; k < pagesToAdd.length; k++) {
+            var pageToAdd = pagesToAdd[k];
+            if (pageToAdd && typeof pageToAdd === 'object' && pageToAdd !== null) {
+                // Check if it's a Promise (shouldn't be, but just in case)
+                if (pageToAdd && typeof pageToAdd.then === 'function') {
+                    log.error('mergePDFs', 'TranID: ' + tranId + ' - Page ' + (k + 1) + ' is a Promise, not a page object');
+                    continue;
+                }
+                
+                try {
+                    mergedPdfDoc.addPage(pageToAdd);
+                    addedCount++;
+                    log.debug('mergePDFs', 'TranID: ' + tranId + ' - Successfully added page ' + (k + 1) + ' of ' + pagesToAdd.length);
+                } catch (addError) {
+                    log.error('mergePDFs', 'TranID: ' + tranId + ' - Error adding page ' + (k + 1) + ': ' + addError.toString());
+                    log.error('mergePDFs', 'TranID: ' + tranId + ' - Page object type: ' + typeof pageToAdd + ', value: ' + String(pageToAdd));
+                }
+            } else {
+                log.error('mergePDFs', 'TranID: ' + tranId + ' - Page ' + (k + 1) + ' is not a valid object, type: ' + typeof pageToAdd + ', value: ' + String(pageToAdd));
+            }
+        }
+        
+        log.debug('mergePDFs', 'TranID: ' + tranId + ' - Successfully added ' + addedCount + ' of ' + pagesToAdd.length + ' page(s) from file ' + fileIndex);
+        return Promise.resolve();
+    }
+    
+    /**
      * Processes PDFs sequentially to merge them into the target document
      * @param {Array} loadPromises - Array of {promise, index, fileId} objects
      * @param {Object} mergedPdfDoc - The target PDF document to merge into
@@ -614,27 +861,39 @@ define(['N/search', 'N/record', 'N/file', 'N/url', 'N/log', 'N/runtime', './PDFl
                 var pageCount = sourcePdfDoc.getPageCount();
                 log.debug('mergePDFs', 'TranID: ' + tranId + ' - File ' + (currentPromise.index + 1) + ' has ' + pageCount + ' page(s)');
                 
-                // Get all page indices [0, 1, 2, ..., pageCount-1]
+                // Build array of all page indices [0, 1, 2, ..., pageCount-1]
                 var pageIndices = [];
                 for (var i = 0; i < pageCount; i++) {
                     pageIndices.push(i);
                 }
                 
-                // Copy all pages from source to merged document
-                var copiedPages = mergedPdfDoc.copyPages(sourcePdfDoc, pageIndices);
+                // Copy all pages at once (standard pdf-lib approach)
+                // NOTE: copyPages might return a Promise in the wrapped version
+                var copiedPagesResult = mergedPdfDoc.copyPages(sourcePdfDoc, pageIndices);
                 
-                // Add each copied page to the merged document
-                copiedPages.forEach(function(page) {
-                    mergedPdfDoc.addPage(page);
-                });
+                // Debug: Log what copyPages returned
+                log.debug('mergePDFs', 'TranID: ' + tranId + ' - copyPages returned type: ' + typeof copiedPagesResult + ', isArray: ' + Array.isArray(copiedPagesResult) + ', isPromise: ' + (copiedPagesResult && typeof copiedPagesResult.then === 'function'));
                 
-                log.debug('mergePDFs', 'TranID: ' + tranId + ' - Copied ' + pageCount + ' page(s) from file ' + (currentPromise.index + 1));
-                
-                // Process next PDF
-                return processPDFsSequentially(loadPromises.slice(1), mergedPdfDoc, tranId);
+                // Check if copyPages returned a Promise
+                if (copiedPagesResult && typeof copiedPagesResult.then === 'function') {
+                    // It's a Promise - resolve it first
+                    return copiedPagesResult.then(function(copiedPages) {
+                        return addPagesToDocument(copiedPages, mergedPdfDoc, tranId, currentPromise.index + 1);
+                    }).then(function() {
+                        // Process next PDF after pages are added
+                        return processPDFsSequentially(loadPromises.slice(1), mergedPdfDoc, tranId);
+                    });
+                } else {
+                    // Not a Promise - use directly
+                    return addPagesToDocument(copiedPagesResult, mergedPdfDoc, tranId, currentPromise.index + 1).then(function() {
+                        // Process next PDF after pages are added
+                        return processPDFsSequentially(loadPromises.slice(1), mergedPdfDoc, tranId);
+                    });
+                }
                 
             } catch (copyError) {
                 log.error('mergePDFs', 'TranID: ' + tranId + ' - Error copying pages from file ' + currentPromise.fileId + ': ' + copyError.toString());
+                log.error('mergePDFs', 'TranID: ' + tranId + ' - Error stack: ' + (copyError.stack || 'No stack trace'));
                 // Continue with next file
                 return processPDFsSequentially(loadPromises.slice(1), mergedPdfDoc, tranId);
             }
@@ -751,60 +1010,14 @@ define(['N/search', 'N/record', 'N/file', 'N/url', 'N/log', 'N/runtime', './PDFl
     
     /**
      * Gets the folder ID for merged labels
-     * The folder URL provided was: https://8227984.app.netsuite.com/app/common/media/mediaitemfolders.nl
-     * This function searches for the folder - you may need to update with the actual folder name
-     * or hardcode the folder ID if you know it
-     * @returns {number} Folder internal ID, or null if not found
+     * Hardcoded folder ID - update this value if the folder ID changes
+     * @returns {number} Folder internal ID
      */
     function getMergedLabelsFolderId() {
-        try {
-            // Option 1: Search for folder by name (update the name to match your folder)
-            // Common names might be: "MERGED LABELS", "Merged Labels", "Batch and Attach", etc.
-            var folderSearch = search.create({
-                type: search.Type.FOLDER,
-                filters: [
-                    [
-                        ['name', 'contains', 'MERGED LABELS'],
-                        'OR',
-                        ['name', 'contains', 'Merged Labels'],
-                        'OR',
-                        ['name', 'contains', 'Batch and Attach']
-                    ]
-                ],
-                columns: [
-                    search.createColumn({ name: 'internalid' }),
-                    search.createColumn({ name: 'name' })
-                ]
-            });
-            
-            var folderId = null;
-            var folderName = null;
-            folderSearch.run().each(function(result) {
-                folderId = result.id;
-                folderName = result.getValue('name');
-                return false; // Get first result
-            });
-            
-            if (folderId) {
-                log.debug('getMergedLabelsFolderId', 'Found merged labels folder: ' + folderName + ' (ID: ' + folderId + ')');
-                return Number(folderId);
-            }
-            
-            // Option 2: If you know the folder ID from the URL, hardcode it here
-            // To find the folder ID:
-            // 1. Go to the folder in NetSuite
-            // 2. Check the URL - it may contain the ID
-            // 3. Or create a saved search to find it
-            // Example: return 12345; // Replace with actual folder ID
-            
-            log.debug('getMergedLabelsFolderId', 'Merged labels folder not found by name, will use root folder');
-            log.debug('getMergedLabelsFolderId', 'To fix: Either update the folder name in the search, or hardcode the folder ID in this function');
-            return null;
-            
-        } catch (e) {
-            log.error('getMergedLabelsFolderId', 'Error getting folder ID: ' + e.toString());
-            return null;
-        }
+        // Hardcoded folder ID for merged labels
+        var folderId = 2021;
+        log.debug('getMergedLabelsFolderId', 'Hardcoded merged labels folder ID: ' + folderId);
+        return Number(folderId);
     }
     
     /**

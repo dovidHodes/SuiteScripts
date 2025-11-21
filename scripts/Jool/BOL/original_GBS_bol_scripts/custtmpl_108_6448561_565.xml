@@ -1,0 +1,10 @@
+<advancedpdftemplate scriptid="custtmpl_108_6448561_565">
+  <description></description>
+  <displaysourcecode>T</displaysourcecode>
+  <isinactive>F</isinactive>
+  <preferred>T</preferred>
+  <printtype>SEARCH</printtype>
+  <savedsearch>[appid=com.suitesuccess.erpcore, scriptid=customsearch_atlas_item_ful_lookup]</savedsearch>
+  <title>Consolidated BOL Template</title>
+  <trantype>CUSTINVC</trantype>
+</advancedpdftemplate>

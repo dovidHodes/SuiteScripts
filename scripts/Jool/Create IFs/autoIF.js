@@ -250,14 +250,8 @@ define([
                 log.debug('map', 'SO ' + tranId + ' has multiple locations (' + locationCount + '), will set custbody_is_split_shipment = true on all IFs');
             }
             
-            // Calculate pickup date from SO MABD (only for entity 1716, part of routing logic)
-            var requestedPickupDate = null;
-            if (parseInt(entityId) === 1716) {
-                var mabdDate = soRecord.getValue('custbody_gbs_mabd');
-                if (mabdDate) {
-                    requestedPickupDate = routingLib.calculatePickupDateFromMABD(mabdDate, tranId);
-                }
-            }
+            // Note: Pickup date calculation is handled by routingLib.calculateAndApplyRoutingFields() 
+            // after the IF is created, so we don't need to calculate it here
             
             // Create one IF per location
             var ifResults = [];
@@ -272,7 +266,7 @@ define([
                         isDynamic: false
                     });
                     
-                    var ifId = createItemFulfillment(currentSoRecord, locationId, linesByLocation[locationId], entityId, tranId, requestedPickupDate, isSplitShipment);
+                    var ifId = createItemFulfillment(currentSoRecord, locationId, linesByLocation[locationId], entityId, tranId, isSplitShipment);
                     if (ifId) {
                         // Get IF tranID
                         var ifRecord = record.load({
@@ -329,7 +323,7 @@ define([
         }
     }
     
-    function createItemFulfillment(soRecord, locationId, lineIndices, entityId, soTranId, requestedPickupDate, isSplitShipment) {
+    function createItemFulfillment(soRecord, locationId, lineIndices, entityId, soTranId, isSplitShipment) {
         var ifId = null; // Declare outside try block so it's accessible in catch
         try {
             var salesOrderId = soRecord.id;
@@ -552,6 +546,12 @@ define([
         try {
             var soData = JSON.parse(reduceContext.values[0]);
             var salesOrderId = soData.salesOrderId;
+            
+            // Safety check: if salesOrderId is missing (e.g., from map error), skip processing
+            if (!salesOrderId) {
+                log.error('reduce', 'Missing salesOrderId in reduce data. Map stage may have failed. Data: ' + JSON.stringify(soData));
+                return;
+            }
             
             // Get SO tranID for logging
             var soRecord = record.load({

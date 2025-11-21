@@ -48,6 +48,14 @@ define([
             case record.Type.WORK_ORDER_ISSUE:
             case record.Type.WORK_ORDER_COMPLETION:
             case record.Type.WORK_ORDER_CLOSE:
+            // Financial transaction types
+            case record.Type.VENDOR_PAYMENT:  // Bill Payment
+            case record.Type.VENDOR_PREPAYMENT:
+            case record.Type.VENDOR_PREPAYMENT_APPLICATION:  // Prepayment Application
+            case record.Type.CHECK:
+            case record.Type.DEPOSIT:
+            case record.Type.CUSTOMER_DEPOSIT:
+            case record.Type.CHARGE:
                 return 'item';
             
             // Transactions that use 'expense' sublist

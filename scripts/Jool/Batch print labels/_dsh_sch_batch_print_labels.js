@@ -375,7 +375,7 @@ define(['N/search', 'N/log', 'N/record', 'N/task', 'N/runtime', './_dsh_lib_time
                                 timeTrackerLib.addTimeTrackerLine({
                                     actionId: 8, // Batch & upload labels action ID
                                     customerId: entityId,
-                                    timeSaved: 40, // 40 seconds
+                                    timeSaved: 5, // 5 seconds per IF
                                     employeeId: 5
                                 });
                                 log.debug('Time Tracker - Batch Print Label', 'Added time tracker line for employee 5, action 8, IF: ' + tranId);
@@ -423,7 +423,7 @@ define(['N/search', 'N/log', 'N/record', 'N/task', 'N/runtime', './_dsh_lib_time
                             timeTrackerLib.addTimeTrackerLine({
                                 actionId: 8, // Batch & upload labels action ID
                                 customerId: entityId,
-                                timeSaved: 40, // 40 seconds
+                                timeSaved: 5, // 5 seconds per IF
                                 employeeId: 5
                             });
                             log.debug('Time Tracker - Batch Print Label', 'Added time tracker line for employee 5, action 8, IF: ' + tranId + ' (status check failed but task submitted)');

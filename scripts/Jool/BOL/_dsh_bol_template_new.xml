@@ -248,7 +248,6 @@
                                 <tr>
                                     <td colspan="3"><b>Freight Charge Terms: <i>(freight charges are prepaid unless marked otherwise)</i></b></td>
                                 </tr>
-                              
                               <tr>
                                   <td width="25%" style="margin-left:12px;"><#if record.frieghtChargeTerms = 'Prepaid selection'><img src = "https://8227984.app.netsuite.com/core/media/media.nl?id=38268&amp;c=8227984&amp;h=rgmnWWLYHZ44SjOgWoueBvOZXWKMdcoWwGJJAb4EP2ijCp9t" width="10px" height="10px" /></#if></td>
                                     <td width="25%" style="margin-left:12px;"><#if record.frieghtChargeTerms = 'Collect'><img src = "https://8227984.app.netsuite.com/core/media/media.nl?id=38268&amp;c=8227984&amp;h=rgmnWWLYHZ44SjOgWoueBvOZXWKMdcoWwGJJAb4EP2ijCp9t" width="10px" height="10px" /></#if></td>

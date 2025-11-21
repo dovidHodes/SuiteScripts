@@ -438,6 +438,7 @@ define([
         },
         nmfc: '', // NMFC number (can be empty or add IF field if available)
         bclass: '', // Freight class (can be empty or add IF field if available)
+        frieghtChargeTerms: 'Collect', // Freight charge terms - hardcoded to 'Collect' to check the Collect checkbox
         // File naming fields
         locationName: locationName, // Location name for file naming
         poNumber: poNumber // PO number for file naming
