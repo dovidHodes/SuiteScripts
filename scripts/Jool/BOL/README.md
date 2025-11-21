@@ -30,8 +30,8 @@ All BOL generation logic is centralized in a **Library Script** that can be call
     BOL Generated & Attached
 
 ┌─────────────────┐
-│Scheduled Script │ (Automated processing)
-│  (_dsh_sch_...) │
+│ Map/Reduce      │ (Automated bulk processing)
+│  (_dsh_mr_...)  │
 └────────┬────────┘
          │ Direct Function Call (no HTTP!)
          ↓
@@ -85,17 +85,20 @@ All BOL generation logic is centralized in a **Library Script** that can be call
   - Record Type: Item Fulfillment
   - Event: beforeLoad (View mode only)
 
-#### `_dsh_sch_bol_scheduled.js` - **Scheduled Script** ⭐
-- **Type**: Scheduled Script
-- **Purpose**: Automated BOL generation for multiple IFs
+#### `_dsh_mr_generate_and_attach_bols.js` - **Map/Reduce Script** ⭐
+- **Type**: Map/Reduce Script
+- **Purpose**: Automated bulk BOL generation for multiple IFs
 - **Calls**: Library Script directly (no HTTP)
-- **Upload Location**: Customization → Scripting → Scripts → New → Script Type: **Scheduled Script**
+- **Upload Location**: Customization → Scripting → Scripts → New → Script Type: **Map/Reduce Script**
 - **Deployment**:
-  - Script ID: `customscript_dsh_sch_bol_scheduled`
-  - Parameters:
-    - `custscript_dsh_bol_folder_id` (Number) - File cabinet folder ID
-    - `custscript_dsh_bol_template_id` (Text) - Template ID (optional)
-- **Schedule**: Set up in Script Deployment → Scheduling tab
+  - Script ID: `customscript_dsh_mr_generate_and_attach_bols`
+  - **No parameters needed** - uses default folder ID (1373) and template ID (CUSTTMPL_DSH_SVC_BOL)
+  - **Schedule**: Set up in Script Deployment → Scheduling tab
+- **Processing Logic**:
+  - Searches for IFs where `entity.custentity_generate_and_attach_bols = true` and `custbody_requested_bol = false`
+  - Filters by SCAC exclusion list (`custentity_dont_generate_bols` on customer record)
+  - Generates BOL for each eligible IF
+  - Sets `custbody_requested_bol = true` after successful generation
 
 ### Example/Reference Files
 
@@ -104,6 +107,7 @@ All BOL generation logic is centralized in a **Library Script** that can be call
 - **Purpose**: Shows how to call Suitelet via HTTP (inefficient)
 - **Status**: Reference only - do not deploy
 - **Why Not Recommended**: Uses extra governance units, network overhead
+- **Note**: This file has been replaced by the Map/Reduce script for better performance
 
 ### Original Scripts (Reference)
 
@@ -165,15 +169,19 @@ Contains the original consolidated BOL scripts for reference:
    - Status: Testing/Released
    - **Important**: The script references the Client Script file path - ensure it matches your file cabinet location
 
-### 5. Upload Scheduled Script (Optional)
+### 5. Upload Map/Reduce Script (Optional - for automated bulk processing)
 1. Go to **Customization → Scripting → Scripts → New**
-2. Script Type: **Scheduled Script**
-3. Upload `_dsh_sch_bol_scheduled.js`
+2. Script Type: **Map/Reduce Script**
+3. Upload `_dsh_mr_generate_and_attach_bols.js`
 4. **Deploy**:
    - Create new deployment
-   - Add parameters (same as Suitelet)
-   - Set schedule in **Scheduling** tab
+   - **No parameters needed** - script uses default folder ID (1373) and template ID (CUSTTMPL_DSH_SVC_BOL)
+   - Set schedule in **Scheduling** tab (e.g., daily, hourly)
    - Status: Testing/Released
+5. **Note**: Script automatically processes IFs where:
+   - Customer has `custentity_generate_and_attach_bols = true`
+   - IF has `custbody_requested_bol = false`
+   - SCAC code is NOT in customer's `custentity_dont_generate_bols` exclusion list
 
 ## How It Works
 
@@ -192,23 +200,31 @@ Contains the original consolidated BOL scripts for reference:
 8. Client Script shows success/error message
 9. Page reloads to show attached PDF
 
-### Scheduled Flow (Automated)
-1. Scheduled Script runs on schedule
-2. Searches for IFs without BOL (empty `custbody_sps_billofladingnumber`)
-3. For each IF:
+### Automated Flow (Map/Reduce)
+1. Map/Reduce Script runs on schedule
+2. **getInputData**: Searches for IFs where:
+   - Customer has `custentity_generate_and_attach_bols = true`
+   - IF has `custbody_requested_bol = false`
+3. **map**: For each IF:
+   - Checks if SCAC code is in customer's exclusion list
+   - If not excluded, passes IF to reduce stage
+4. **reduce**: For each eligible IF:
    - Calls Library Script function directly
    - Library Script generates and attaches BOL
-4. Logs success/error counts
+   - Sets `custbody_requested_bol = true` after success
+5. **summarize**: Logs completion stats and errors
 
-## Key Differences: Button vs Scheduled
+## Key Differences: Button vs Automated (Map/Reduce)
 
-| Aspect | Button (Suitelet) | Scheduled Script |
-|--------|------------------|------------------|
+| Aspect | Button (Suitelet) | Map/Reduce Script |
+|--------|------------------|-------------------|
 | **Trigger** | User clicks button | Automated schedule |
 | **Method** | HTTP request | Direct function call |
-| **Governance** | ~15 units per call | ~2 units per call |
+| **Governance** | ~15 units per call | ~10-20 units per IF |
 | **Speed** | Network latency | Instant |
-| **Code** | Suitelet + Library | Library only |
+| **Code** | Suitelet + Library | Map/Reduce + Library |
+| **Processing** | Single IF at a time | Bulk processing (hundreds of IFs) |
+| **Filtering** | Manual selection | Automatic (customer flags + SCAC exclusion) |
 
 ## Advanced PDF/HTML Template
 
@@ -260,11 +276,13 @@ Both the Suitelet and Scheduled Script support the following deployment paramete
 - Review script logs for template errors
 - Verify IF has required data (packages, addresses, etc.)
 
-### Scheduled Script Not Running
+### Map/Reduce Script Not Running
 - Check script deployment status
 - Verify schedule is set correctly
-- Review execution logs
-- Check governance limits
+- Review execution logs (getInputData, map, reduce, summarize)
+- Check governance limits (Map/Reduce has 10,000 unit limit)
+- Verify customer records have `custentity_generate_and_attach_bols = true`
+- Check if IFs already have `custbody_requested_bol = true` (already processed)
 
 ## Future Enhancements
 

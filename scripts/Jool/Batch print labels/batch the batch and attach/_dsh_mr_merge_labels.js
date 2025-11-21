@@ -844,6 +844,116 @@ define(['N/search', 'N/record', 'N/file', 'N/url', 'N/log', 'N/runtime', './PDFl
     }
     
     /**
+     * Copies pages from source PDF to merged PDF one at a time
+     * This ensures all pages are copied correctly, especially for multi-page PDFs
+     * @param {Object} sourcePdfDoc - Source PDF document to copy from
+     * @param {Object} mergedPdfDoc - Target PDF document to copy to
+     * @param {number} pageCount - Total number of pages to copy
+     * @param {string} tranId - Transaction ID for logging
+     * @param {number} fileIndex - File index for logging
+     * @returns {Promise} Promise that resolves when all pages are copied
+     */
+    function copyPagesOneByOne(sourcePdfDoc, mergedPdfDoc, pageCount, tranId, fileIndex) {
+        if (pageCount === 0) {
+            log.debug('copyPagesOneByOne', 'TranID: ' + tranId + ' - No pages to copy from file ' + fileIndex);
+            return Promise.resolve();
+        }
+        
+        // Start with the first page (index 0)
+        return copyPageRecursive(sourcePdfDoc, mergedPdfDoc, 0, pageCount, tranId, fileIndex);
+    }
+    
+    /**
+     * Recursively copies pages one at a time
+     * @param {Object} sourcePdfDoc - Source PDF document
+     * @param {Object} mergedPdfDoc - Target PDF document
+     * @param {number} currentPageIndex - Current page index to copy (0-based)
+     * @param {number} totalPages - Total number of pages to copy
+     * @param {string} tranId - Transaction ID for logging
+     * @param {number} fileIndex - File index for logging
+     * @returns {Promise} Promise that resolves when all pages are copied
+     */
+    function copyPageRecursive(sourcePdfDoc, mergedPdfDoc, currentPageIndex, totalPages, tranId, fileIndex) {
+        if (currentPageIndex >= totalPages) {
+            // All pages copied
+            log.debug('copyPageRecursive', 'TranID: ' + tranId + ' - Finished copying all ' + totalPages + ' page(s) from file ' + fileIndex);
+            return Promise.resolve();
+        }
+        
+        try {
+            // Copy one page at a time
+            var pageIndex = currentPageIndex;
+            log.debug('copyPageRecursive', 'TranID: ' + tranId + ' - Copying page ' + (pageIndex + 1) + ' of ' + totalPages + ' from file ' + fileIndex);
+            
+            // Copy the current page
+            var copiedPagesResult = mergedPdfDoc.copyPages(sourcePdfDoc, [pageIndex]);
+            
+            // Handle Promise or direct result
+            var copyPromise;
+            if (copiedPagesResult && typeof copiedPagesResult.then === 'function') {
+                copyPromise = copiedPagesResult;
+            } else {
+                copyPromise = Promise.resolve(copiedPagesResult);
+            }
+            
+            return copyPromise.then(function(copiedPages) {
+                // copiedPages should be an array with one page
+                var pagesArray = [];
+                if (Array.isArray(copiedPages)) {
+                    pagesArray = copiedPages;
+                } else if (copiedPages && typeof copiedPages.length !== 'undefined') {
+                    // Array-like object
+                    for (var i = 0; i < copiedPages.length; i++) {
+                        if (copiedPages[i] !== undefined && copiedPages[i] !== null) {
+                            pagesArray.push(copiedPages[i]);
+                        }
+                    }
+                } else if (copiedPages) {
+                    // Single object
+                    pagesArray = [copiedPages];
+                }
+                
+                if (pagesArray.length === 0) {
+                    log.error('copyPageRecursive', 'TranID: ' + tranId + ' - No pages returned from copyPages for page index ' + pageIndex);
+                    // Continue with next page
+                    return copyPageRecursive(sourcePdfDoc, mergedPdfDoc, currentPageIndex + 1, totalPages, tranId, fileIndex);
+                }
+                
+                // Add the copied page to the merged document
+                var pageAdded = false;
+                for (var j = 0; j < pagesArray.length; j++) {
+                    var pageToAdd = pagesArray[j];
+                    if (pageToAdd && typeof pageToAdd === 'object' && pageToAdd !== null) {
+                        try {
+                            mergedPdfDoc.addPage(pageToAdd);
+                            pageAdded = true;
+                            log.debug('copyPageRecursive', 'TranID: ' + tranId + ' - Successfully added page ' + (pageIndex + 1) + ' of ' + totalPages + ' from file ' + fileIndex);
+                        } catch (addError) {
+                            log.error('copyPageRecursive', 'TranID: ' + tranId + ' - Error adding page ' + (pageIndex + 1) + ': ' + addError.toString());
+                        }
+                    }
+                }
+                
+                if (!pageAdded) {
+                    log.error('copyPageRecursive', 'TranID: ' + tranId + ' - Failed to add page ' + (pageIndex + 1) + ' from file ' + fileIndex);
+                }
+                
+                // Recursively copy the next page
+                return copyPageRecursive(sourcePdfDoc, mergedPdfDoc, currentPageIndex + 1, totalPages, tranId, fileIndex);
+            }).catch(function(copyError) {
+                log.error('copyPageRecursive', 'TranID: ' + tranId + ' - Error copying page ' + (pageIndex + 1) + ' from file ' + fileIndex + ': ' + copyError.toString());
+                // Continue with next page even if this one failed
+                return copyPageRecursive(sourcePdfDoc, mergedPdfDoc, currentPageIndex + 1, totalPages, tranId, fileIndex);
+            });
+            
+        } catch (error) {
+            log.error('copyPageRecursive', 'TranID: ' + tranId + ' - Error in copyPageRecursive for page ' + (currentPageIndex + 1) + ': ' + error.toString());
+            // Continue with next page
+            return copyPageRecursive(sourcePdfDoc, mergedPdfDoc, currentPageIndex + 1, totalPages, tranId, fileIndex);
+        }
+    }
+    
+    /**
      * Processes PDFs sequentially to merge them into the target document
      * @param {Array} loadPromises - Array of {promise, index, fileId} objects
      * @param {Object} mergedPdfDoc - The target PDF document to merge into
@@ -861,35 +971,12 @@ define(['N/search', 'N/record', 'N/file', 'N/url', 'N/log', 'N/runtime', './PDFl
                 var pageCount = sourcePdfDoc.getPageCount();
                 log.debug('mergePDFs', 'TranID: ' + tranId + ' - File ' + (currentPromise.index + 1) + ' has ' + pageCount + ' page(s)');
                 
-                // Build array of all page indices [0, 1, 2, ..., pageCount-1]
-                var pageIndices = [];
-                for (var i = 0; i < pageCount; i++) {
-                    pageIndices.push(i);
-                }
-                
-                // Copy all pages at once (standard pdf-lib approach)
-                // NOTE: copyPages might return a Promise in the wrapped version
-                var copiedPagesResult = mergedPdfDoc.copyPages(sourcePdfDoc, pageIndices);
-                
-                // Debug: Log what copyPages returned
-                log.debug('mergePDFs', 'TranID: ' + tranId + ' - copyPages returned type: ' + typeof copiedPagesResult + ', isArray: ' + Array.isArray(copiedPagesResult) + ', isPromise: ' + (copiedPagesResult && typeof copiedPagesResult.then === 'function'));
-                
-                // Check if copyPages returned a Promise
-                if (copiedPagesResult && typeof copiedPagesResult.then === 'function') {
-                    // It's a Promise - resolve it first
-                    return copiedPagesResult.then(function(copiedPages) {
-                        return addPagesToDocument(copiedPages, mergedPdfDoc, tranId, currentPromise.index + 1);
-                    }).then(function() {
-                        // Process next PDF after pages are added
-                        return processPDFsSequentially(loadPromises.slice(1), mergedPdfDoc, tranId);
-                    });
-                } else {
-                    // Not a Promise - use directly
-                    return addPagesToDocument(copiedPagesResult, mergedPdfDoc, tranId, currentPromise.index + 1).then(function() {
-                        // Process next PDF after pages are added
-                        return processPDFsSequentially(loadPromises.slice(1), mergedPdfDoc, tranId);
-                    });
-                }
+                // Copy pages one at a time to ensure all pages are merged
+                // This approach is more reliable than copying all pages at once
+                return copyPagesOneByOne(sourcePdfDoc, mergedPdfDoc, pageCount, tranId, currentPromise.index + 1).then(function() {
+                    // Process next PDF after all pages are added
+                    return processPDFsSequentially(loadPromises.slice(1), mergedPdfDoc, tranId);
+                });
                 
             } catch (copyError) {
                 log.error('mergePDFs', 'TranID: ' + tranId + ' - Error copying pages from file ' + currentPromise.fileId + ': ' + copyError.toString());

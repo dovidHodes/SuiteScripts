@@ -9,79 +9,27 @@ NetSuite automation scripts and utilities for EDI processing, invoice management
 ├── NetSuite_Troubleshooting_Memories.md # Lessons learned and troubleshooting guide
 ├── .gitignore                          # Git ignore patterns for secrets and temporary files
 └── scripts/                            # NetSuite scripts folder
-    ├── AGA/                            # AGA customer-specific scripts
-    │   ├── Approve EDI button/         # EDI approval button functionality
-    │   ├── reconcilePackages/          # Package reconciliation scripts
-    │   ├── retrieve_and_attach_PODs.js # FedEx POD document retrieval
-    │   ├── setIFasReadyToSend.js       # Set Item Fulfillments as ready to send
-    │   ├── setInvoiceAsReadyToSend.js  # Auto-approve invoices for EDI transmission
-    │   └── wmSecheduledGetPODs.js      # Scheduled POD retrieval
-    └── Jool/                           # Jool customer-specific scripts
-        ├── Approve AVC orders/         # AVC order approval automation
-        ├── Auto Pack IFs/              # Automated Item Fulfillment packing
-        ├── Batch print labels/         # Batch label printing and merging
-        ├── BOL/                        # Bill of Lading generation
-        ├── Create IFs/                 # Item Fulfillment creation automation
-        ├── SPS Scripts/                # SPS Commerce integration scripts
-        │   ├── Autopack/               # SPS autopack functionality
-        │   ├── Batch print/            # SPS batch label printing
-        │   └── IF buttons/             # Item Fulfillment button enhancements
-        └── time tracker/               # Time tracking library and documentation
+    ├── Jool/                           # Jool customer-specific scripts
+    │   ├── Approve AVC orders/         # AVC order approval automation
+    │   ├── Auto Pack IFs/              # Automated Item Fulfillment packing
+    │   ├── Batch print labels/         # Batch label printing and merging
+    │   ├── BOL/                        # Bill of Lading generation
+    │   ├── Create IFs/                 # Item Fulfillment creation automation
+    │   ├── SPS Scripts/                # SPS Commerce integration scripts
+    │   │   ├── Autopack/               # SPS autopack functionality
+    │   │   ├── Batch print/            # SPS batch label printing
+    │   │   └── IF buttons/             # Item Fulfillment button enhancements
+    │   └── time tracker/               # Time tracking library and documentation
+    └── AGA/                            # AGA customer-specific scripts
+        ├── Approve EDI button/         # EDI approval button functionality
+        ├── reconcilePackages/          # Package reconciliation scripts
+        ├── retrieve_and_attach_PODs.js # FedEx POD document retrieval
+        ├── setIFasReadyToSend.js       # Set Item Fulfillments as ready to send
+        ├── setInvoiceAsReadyToSend.js  # Auto-approve invoices for EDI transmission
+        └── wmSecheduledGetPODs.js      # Scheduled POD retrieval
 ```
 
 ## Scripts
-
-### setInvoiceAsReadyToSend.js
-Scheduled script that automatically processes invoices for EDI transmission approval by verifying sibling Item Fulfillment shipping status and applying customer-specific business logic. Failed processing attempts are logged through EDI error records with trading partner identification.
-
-#### Custom Logic
-• TP Target (entity 546) invoices have their integration status set to 9 and bypass EDI approval entirely
-
-### setIFasReadyToSend.js
-Scheduled script that automatically approves Item Fulfillments for EDI transmission. Processes IFs from a saved search and applies customer-specific logic before setting the EDI approval field.
-
-#### Custom Logic
-• Menards (entity 545): Sets ASN status to 16 when PO Type is 'DR'
-
-### retrieve_and_attach_PODs.js
-Suitelet for automated FedEx POD (Proof of Delivery) document retrieval and attachment to package records. Processes tracking numbers through the FedEx API to fetch POD documents and automatically attaches them to the corresponding NetSuite package records. Includes comprehensive error handling with EDI error record creation and dynamic account number mapping based on Walmart DC numbers.
-
-#### Key Features
-• **FedEx API Integration**: OAuth token authentication and document retrieval
-• **Dynamic Date Range**: Based on package creation date (start = creation date, end = creation date + 1 month)
-• **Account Number Mapping**: Walmart DC number to FedEx account number lookup via custom transaction record
-• **Comprehensive Error Handling**: Centralized error handling with single error record creation
-• **File Attachment**: Automatic PDF creation and attachment to package records
-• **Status Updates**: Real-time package record status and message updates
-
-#### Custom Logic
-• **Walmart DC Validation**: Must be exactly 4 digits (numeric only)
-• **Carrier Detection**: Automatic UPS vs FedEx detection based on tracking number format
-• **Error Record Creation**: Action ID 9 for "Fetch PODs" with package record reference
-• **Safety Net Error Handling**: Main catch block ensures all errors are tracked
-
-#### Required Script Parameters
-• `custscript_fedex_api_key`: FedEx API key
-• `custscript_fedex_secret_key`: FedEx API secret key
-• `custscript_account_mapping_record`: ID of account mapping record
-
-### wmSecheduledGetPODs.js
-Scheduled script that processes packages from a saved search and calls the POD retrieval suitelet for each package. Generates suitelet URLs dynamically and handles tracking number validation and error reporting.
-
-#### Key Features
-• **Deduplication Logic**: Prevents processing duplicate packages from saved search joins
-• **Dynamic URL Generation**: Creates fully qualified HTTPS URLs for suitelet calls
-• **Comprehensive Error Handling**: Tracks processing statistics and error reporting
-• **Progress Monitoring**: Detailed logging and progress reporting
-
-#### Custom Logic
-• **Package Deduplication**: Uses Set to track processed package IDs
-• **URL Construction**: Manual HTTPS URL building for NetSuite compatibility
-• **Tracking Number Validation**: Skips packages without tracking numbers
-• **Processing Statistics**: Tracks total, processed, success, error, and skipped counts
-
-#### Required Script Parameters
-• `custscript_saved_search_id`: ID of saved search containing packages to process
 
 ## Jool Scripts
 
@@ -91,14 +39,14 @@ Automated BOL generation from Item Fulfillment records with support for both but
 **Key Features:**
 - Library script pattern for code reusability
 - Button-triggered generation via Suitelet
-- Scheduled automated generation
+- Map/Reduce automated generation
 - PDF attachment to Item Fulfillment records
 - Advanced PDF/HTML template support
 
 **Files:**
 - `_dsh_lib_bol_generator.js` - Core library with shared BOL generation logic
 - `_dsh_sl_single_bol_generate.js` - Suitelet for button-triggered generation
-- `_dsh_sch_bol_scheduled.js` - Scheduled script for automated generation
+- `_dsh_mr_generate_and_attach_bols.js` - Map/Reduce script for automated generation
 - `_dsh_ue_if_bol_button.js` - User Event script that adds BOL button to IF form
 - `_dsh_cs_single_bol_button.js` - Client script for button click handling
 
@@ -173,6 +121,61 @@ SPS Commerce integration scripts for autopack, batch printing, and Item Fulfillm
 - `Autopack/` - Automated packing scripts
 - `Batch print/` - Label batch printing scripts
 - `IF buttons/` - Item Fulfillment button enhancements
+
+## AGA Scripts
+
+### setInvoiceAsReadyToSend.js
+Scheduled script that automatically processes invoices for EDI transmission approval by verifying sibling Item Fulfillment shipping status and applying customer-specific business logic. Failed processing attempts are logged through EDI error records with trading partner identification.
+
+#### Custom Logic
+• TP Target (entity 546) invoices have their integration status set to 9 and bypass EDI approval entirely
+
+### setIFasReadyToSend.js
+Scheduled script that automatically approves Item Fulfillments for EDI transmission. Processes IFs from a saved search and applies customer-specific logic before setting the EDI approval field.
+
+#### Custom Logic
+• Menards (entity 545): Sets ASN status to 16 when PO Type is 'DR'
+
+### retrieve_and_attach_PODs.js
+Suitelet for automated FedEx POD (Proof of Delivery) document retrieval and attachment to package records. Processes tracking numbers through the FedEx API to fetch POD documents and automatically attaches them to the corresponding NetSuite package records. Includes comprehensive error handling with EDI error record creation and dynamic account number mapping based on Walmart DC numbers.
+
+#### Key Features
+• **FedEx API Integration**: OAuth token authentication and document retrieval
+• **Dynamic Date Range**: Based on package creation date (start = creation date, end = creation date + 1 month)
+• **Account Number Mapping**: Walmart DC number to FedEx account number lookup via custom transaction record
+• **Comprehensive Error Handling**: Centralized error handling with single error record creation
+• **File Attachment**: Automatic PDF creation and attachment to package records
+• **Status Updates**: Real-time package record status and message updates
+
+#### Custom Logic
+• **Walmart DC Validation**: Must be exactly 4 digits (numeric only)
+• **Carrier Detection**: Automatic UPS vs FedEx detection based on tracking number format
+• **Error Record Creation**: Action ID 9 for "Fetch PODs" with package record reference
+• **Safety Net Error Handling**: Main catch block ensures all errors are tracked
+
+#### Required Script Parameters
+• `custscript_fedex_api_key`: FedEx API key
+• `custscript_fedex_secret_key`: FedEx API secret key
+• `custscript_account_mapping_record`: ID of account mapping record
+
+### wmSecheduledGetPODs.js
+Scheduled script that processes packages from a saved search and calls the POD retrieval suitelet for each package. Generates suitelet URLs dynamically and handles tracking number validation and error reporting.
+
+#### Key Features
+• **Deduplication Logic**: Prevents processing duplicate packages from saved search joins
+• **Dynamic URL Generation**: Creates fully qualified HTTPS URLs for suitelet calls
+• **Comprehensive Error Handling**: Tracks processing statistics and error reporting
+• **Progress Monitoring**: Detailed logging and progress reporting
+
+#### Custom Logic
+• **Package Deduplication**: Uses Set to track processed package IDs
+• **URL Construction**: Manual HTTPS URL building for NetSuite compatibility
+• **Tracking Number Validation**: Skips packages without tracking numbers
+• **Processing Statistics**: Tracks total, processed, success, error, and skipped counts
+
+#### Required Script Parameters
+• `custscript_saved_search_id`: ID of saved search containing packages to process
+
 
 ## Documentation
 
