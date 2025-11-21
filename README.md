@@ -74,7 +74,7 @@ Automated batch printing of carton labels with PDF merging capabilities.
 - Merge script combines all PDFs into a single merged file
 
 ### Approve AVC Orders
-Automated approval of AVC (Advanced Vendor Catalog) orders with warehouse-specific logic.
+Automated approval of AVC (Amazon Vendor Central) orders with warehouse-specific logic.
 
 **Key Features:**
 - Entity-specific processing (entity 1716)
