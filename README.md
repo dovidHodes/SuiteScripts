@@ -10,15 +10,16 @@ NetSuite automation scripts and utilities for EDI processing, invoice management
 ├── .gitignore                          # Git ignore patterns for secrets and temporary files
 └── scripts/                            # NetSuite scripts folder
     ├── Jool/                           # Jool customer-specific scripts
+    │   ├── Add Packages to IF/         # Add packages to Item Fulfillment sublist
     │   ├── Approve AVC orders/         # AVC order approval automation
     │   ├── Auto Pack IFs/              # Automated Item Fulfillment packing
     │   ├── Batch print labels/         # Batch label printing and merging
     │   ├── BOL/                        # Bill of Lading generation
+    │   ├── Calculate and set routing/  # Routing calculation and automation
     │   ├── Create IFs/                 # Item Fulfillment creation automation
-    │   ├── delete/                     # Package deletion diagnostic tools
+    │   ├── Integrated Shipping Labels/ # Integrated shipping labels from SPS packages
+    │   ├── Package Deletion Diagnostics/ # Package deletion diagnostic tools
     │   ├── Packing_List/               # Packing slip PDF templates
-    │   ├── Set routing info AVC library code/  # Routing calculation library
-    │   ├── Set routing info AVC UE/    # Routing User Event script
     │   ├── SPS Scripts/                # SPS Commerce integration scripts
     │   │   ├── Autopack/               # SPS autopack functionality
     │   │   ├── Batch print/            # SPS batch label printing
@@ -117,7 +118,7 @@ Automated creation of Item Fulfillments from Sales Orders grouped by location.
 **Files:**
 - `autoIF.js` - Map/Reduce script for automated IF creation
 
-### Set Routing Info AVC
+### Calculate and Set Routing
 Automated calculation and application of Amazon Vendor Central routing information to Item Fulfillments.
 
 **Key Features:**
@@ -126,10 +127,15 @@ Automated calculation and application of Amazon Vendor Central routing informati
 - Pickup date calculation
 - Entity-specific (entity 1716 only)
 - Time tracking integration
+- Suitelet for manual calculation
+- User Event for automatic routing
 
 **Files:**
-- `Set routing info AVC library code/_dsh_lib_routing_calculator.js` - Reusable routing library
-- `Set routing info AVC UE/setAVCroutingIF_UE.js` - User Event script for automatic routing
+- `Calculate and set routing/_dsh_lib_routing_calculator.js` - Reusable routing library
+- `Calculate and set routing/_dsh_sl_calculate_routing.js` - Suitelet for manual routing calculation
+- `Calculate and set routing/UE/setAVCroutingIF_UE.js` - User Event script for automatic routing
+
+See `scripts/Jool/Calculate and set routing/README.md` for detailed documentation.
 
 ### Packing List
 Advanced PDF/HTML templates for generating packing slip documents.
@@ -143,16 +149,38 @@ Advanced PDF/HTML templates for generating packing slip documents.
 - `packing_slip_template_original.xml` - Original packing slip template
 - `packing_slip_template_with_rick_roll.xml` - Modified template with custom content
 
-### Delete Packages
+### Integrated Shipping Labels
+Automated creation of integrated shipping labels from SPS packages for Item Fulfillments.
+
+**Key Features:**
+- SCH → MR → Library pattern for flexible triggering
+- Entity-based processing with routing support
+- SCAC validation against small parcel list
+- Automatic package line creation from SPS packages
+- Carton number auto-increment
+- Amazon ARN reference setting
+- Ship method and carrier configuration
+
+**Files:**
+- `_dsh_sch_integrated_shipping_labels.js` - Scheduled script for finding IFs
+- `_dsh_mr_integrated_shipping_labels.js` - Map/Reduce script for bulk processing
+- `_dsh_lib_integrated_shipping_labels.js` - Library with core business logic
+
+See `scripts/Jool/Integrated Shipping Labels/README.md` for detailed documentation.
+
+### Package Deletion Diagnostics
 Diagnostic tools for checking package deletion dependencies and issues.
 
 **Key Features:**
 - Comprehensive dependency checking
 - User Event script detection
 - Performance analysis
+- Field relationship inspection
 
 **Files:**
-- `checkPackageDependencies.js` - Diagnostic script for package deletion blockers
+- `Package Deletion Diagnostics/checkPackageDependencies.js` - Diagnostic script for package deletion blockers
+
+See `scripts/Jool/Package Deletion Diagnostics/README.md` for detailed documentation.
 
 ### Time Tracker
 Centralized time tracking system for measuring automation savings.
@@ -264,20 +292,39 @@ Script for deleting package records (diagnostic/utility script).
 
 ## Documentation
 
-- **NetSuite_Troubleshooting_Memories.md**: Comprehensive troubleshooting guide with lessons learned from NetSuite development
+### Architecture & Patterns
+- **scripts/AUTOMATION_ARCHITECTURE.md**: Comprehensive guide to automation patterns (SCH→MR vs Library→MR)
+- **scripts/Jool/NS_TROUBLESHOOTING_GUIDE.md**: NetSuite troubleshooting guide with common issues and solutions
+
+### Customer-Specific Documentation
 - **scripts/AGA/EDI_Error_Record_Reference.md**: Reference for EDI error record structure and usage patterns
 - **scripts/Jool/BOL/README.md**: Detailed BOL generation documentation
 - **scripts/Jool/BOL/BOL_PROCESS_OVERVIEW.md**: BOL process overview and integration details
+- **scripts/Jool/Integrated Shipping Labels/README.md**: Integrated shipping labels automation documentation
+- **scripts/Jool/Calculate and set routing/README.md**: Routing calculation and automation documentation
 - **scripts/Jool/time tracker/TIME_TRACKER.md**: Complete time tracker implementation and usage guide
+
+### General Documentation
+- **NetSuite_Troubleshooting_Memories.md**: Comprehensive troubleshooting guide with lessons learned from NetSuite development
 
 ## Getting Started
 
 1. Clone this repository
-2. Review the troubleshooting memories for common NetSuite development patterns
-3. Use the EDI error record reference for consistent error handling
-4. Deploy scripts to your NetSuite environment
-5. Configure required script parameters
-6. Test with sample data before production use
+2. Review **AUTOMATION_ARCHITECTURE.md** to understand automation patterns
+3. Review the troubleshooting guides for common NetSuite development patterns
+4. Use the EDI error record reference for consistent error handling
+5. Deploy scripts to your NetSuite environment
+6. Configure required script parameters
+7. Test with sample data before production use
+
+## Automation Patterns
+
+This codebase follows two main automation patterns documented in `scripts/AUTOMATION_ARCHITECTURE.md`:
+
+1. **SCH → MR Pattern**: Scheduled Script calls Map/Reduce (for complex pre-processing)
+2. **Library → MR Pattern**: Library code called by MR (for maximum reusability)
+
+**Default Recommendation**: Use Library → MR pattern unless you need complex pre-processing, multiple deployments, or advanced batching.
 
 ## Error Handling Architecture
 
