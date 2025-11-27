@@ -29,17 +29,49 @@ define([
    */
   function getInputData(inputContext) {
     try {
-      log.audit('getInputData', 'Starting search for Item Fulfillment records');
+      // First, search for customers where custentity_generate_and_attach_bols = true
+      var entityIds = [];
+      try {
+        var entitySearch = search.create({
+          type: 'customer',
+          filters: [
+            ['custentity_generate_and_attach_bols', 'is', 'T']
+          ],
+          columns: [
+            search.createColumn({ name: 'internalid' })
+          ]
+        });
+        
+        var entitySearchResults = entitySearch.run();
+        entitySearchResults.each(function(result) {
+          entityIds.push(result.id);
+          return true;
+        });
+      } catch (e) {
+        log.error('getInputData', 'Error searching for customers: ' + e.toString());
+        return search.create({
+          type: 'itemfulfillment',
+          filters: [['internalid', 'none', '@NONE@']]
+        });
+      }
       
-      // Search for Item Fulfillment records where:
-      // - entity.custentity_generate_and_attach_bols = true
-      // - custbody_requested_bol = false
+      if (entityIds.length === 0) {
+        log.audit('getInputData', 'No customers found with custentity_generate_and_attach_bols = true');
+        return search.create({
+          type: 'itemfulfillment',
+          filters: [['internalid', 'none', '@NONE@']]
+        });
+      }
+      
+      // Search for Item Fulfillment records with the required criteria
       var ifSearch = search.create({
         type: 'itemfulfillment',
         filters: [
-          ['entity.custentity_generate_and_attach_bols', 'is', 'T'],
+          ['entity', 'anyof', entityIds],
           'AND',
-          ['custbody_requested_bol', 'is', 'F']
+          ['custbody_requested_bol', 'is', 'F'],
+          'AND',
+          ['custbody_routing_status', 'is', 3]
         ],
         columns: [
           search.createColumn({ name: 'internalid' }),
@@ -49,7 +81,7 @@ define([
         ]
       });
       
-      log.audit('getInputData', 'Search created, returning search object');
+      log.audit('getInputData', 'Found ' + entityIds.length + ' customer(s), created IF search');
       return ifSearch;
       
     } catch (e) {
@@ -90,17 +122,8 @@ define([
         }
       }
       
-      log.debug('map', 'TranID: ' + tranId + ' - Processing IF (ID: ' + ifId + '), Entity: ' + entityId + ', SCAC: ' + scac);
-      
-      // If no SCAC, skip this IF
-      if (!scac || scac === '') {
-        log.debug('map', 'TranID: ' + tranId + ' - Skipping IF: no SCAC code');
-        return;
-      }
-      
-      // If no entity, skip this IF
-      if (!entityId) {
-        log.debug('map', 'TranID: ' + tranId + ' - Skipping IF: no entity');
+      // If no SCAC or entity, skip this IF
+      if (!scac || scac === '' || !entityId) {
         return;
       }
       
@@ -113,43 +136,44 @@ define([
         });
         
         // Get the multi-select field text values
-        // getText() returns a comma-separated string of text values for multi-select fields
         var dontGenerateBOLsText = '';
         try {
-          dontGenerateBOLsText = customerRecord.getText({
+          var textValue = customerRecord.getText({
             fieldId: 'custentity_dont_generate_bols'
-          }) || '';
+          });
+          dontGenerateBOLsText = (textValue ? String(textValue) : '') || '';
         } catch (textError) {
-          log.debug('map', 'TranID: ' + tranId + ' - Error getting exclusion list text: ' + textError.toString());
+          dontGenerateBOLsText = '';
         }
         
-        log.debug('map', 'TranID: ' + tranId + ' - Customer exclusion list: ' + (dontGenerateBOLsText || 'empty'));
-        
         // Check if SCAC is in the exclusion list
-        // getText() returns a comma-separated string of text values for multi-select fields
-        if (dontGenerateBOLsText && dontGenerateBOLsText.trim() !== '') {
-          // Split by comma and clean up each item
+        if (dontGenerateBOLsText && typeof dontGenerateBOLsText === 'string' && dontGenerateBOLsText.trim() !== '') {
           var exclusionList = dontGenerateBOLsText.split(',').map(function(item) {
             return item.trim();
           });
           
-          // Check if SCAC is in the exclusion list (case-insensitive comparison)
+          log.debug('map', 'TranID: ' + tranId + ' - Comparing SCAC "' + scac + '" against exclusion list: ' + exclusionList.join(', '));
+          
           var scacInExclusionList = false;
           for (var i = 0; i < exclusionList.length; i++) {
             if (exclusionList[i].toUpperCase() === scac.toUpperCase()) {
               scacInExclusionList = true;
+              log.debug('map', 'TranID: ' + tranId + ' - Match found: SCAC "' + scac + '" is in exclusion list');
               break;
             }
           }
           
           if (scacInExclusionList) {
-            log.debug('map', 'TranID: ' + tranId + ' - Skipping IF: SCAC "' + scac + '" is in exclusion list');
+            log.debug('map', 'TranID: ' + tranId + ' - Skipping: SCAC "' + scac + '" in exclusion list');
             return;
+          } else {
+            log.debug('map', 'TranID: ' + tranId + ' - SCAC "' + scac + '" not in exclusion list, proceeding');
           }
+        } else {
+          log.debug('map', 'TranID: ' + tranId + ' - No exclusion list found, proceeding');
         }
         
         // All checks passed - write to reduce for processing
-        log.debug('map', 'TranID: ' + tranId + ' - IF passed all checks, writing to reduce');
         mapContext.write(ifId, {
           ifId: ifId,
           tranId: tranId,
@@ -178,29 +202,53 @@ define([
       var ifId = ifData.ifId;
       var tranId = ifData.tranId;
       
-      log.audit('reduce', 'TranID: ' + tranId + ' - Starting BOL generation for IF (ID: ' + ifId + ')');
+      // Check if this IF has already been processed (prevent duplicate processing)
+      try {
+        var ifRecord = record.load({
+          type: 'itemfulfillment',
+          id: ifId,
+          isDynamic: false
+        });
+        if (ifRecord.getValue('custbody_requested_bol')) {
+          log.debug('reduce', 'TranID: ' + tranId + ' - Already processed, skipping');
+          return;
+        }
+      } catch (checkError) {
+        // Continue processing if we can't check
+      }
       
       // Call library function to generate and attach BOL
-      // Library will use default folder ID (1373) and template ID (CUSTTMPL_DSH_SVC_BOL)
+      log.audit('reduce', 'TranID: ' + tranId + ' - Generating BOL for IF (ID: ' + ifId + ')');
       var result = bolLib.generateAndAttachBOL(ifId, null, null);
       
       if (result.success) {
-        log.audit('reduce', 'TranID: ' + tranId + ' - BOL generated and attached successfully. File ID: ' + result.fileId);
+        log.audit('reduce', 'TranID: ' + tranId + ' - BOL generated successfully. File ID: ' + result.fileId);
         
         // Set custbody_requested_bol to true after successful BOL generation
         try {
           record.submitFields({
             type: 'itemfulfillment',
             id: ifId,
-            values: {
-              custbody_requested_bol: true
-            },
+            values: { custbody_requested_bol: true },
             options: {
               enableSourcing: false,
               ignoreMandatoryFields: true
             }
           });
-          log.debug('reduce', 'TranID: ' + tranId + ' - Set custbody_requested_bol to true');
+          
+          // Verify the checkbox was actually set
+          try {
+            var verifyRecord = record.load({
+              type: 'itemfulfillment',
+              id: ifId,
+              isDynamic: false
+            });
+            if (!verifyRecord.getValue('custbody_requested_bol')) {
+              log.error('reduce', 'TranID: ' + tranId + ' - WARNING: custbody_requested_bol still false after setting!');
+            }
+          } catch (verifyError) {
+            // Verification failed, but field was set
+          }
         } catch (fieldError) {
           log.error('reduce', 'TranID: ' + tranId + ' - Error setting custbody_requested_bol: ' + fieldError.toString());
         }
@@ -218,20 +266,34 @@ define([
    * @param {Object} summaryContext
    */
   function summarize(summaryContext) {
-    log.audit('summarize', 'Map/Reduce script completed');
-    log.audit('summarize', 'Usage: ' + summaryContext.usage);
-    log.audit('summarize', 'Yields: ' + summaryContext.yields);
+    log.audit('summarize', 'Map/Reduce script completed - Usage: ' + summaryContext.usage + ', Yields: ' + summaryContext.yields);
     
-    if (summaryContext.output) {
-      log.audit('summarize', 'Output stage completed');
+    if (summaryContext.mapSummary && summaryContext.mapSummary.errors) {
+      var mapErrors = summaryContext.mapSummary.errors;
+      if (Array.isArray(mapErrors)) {
+        log.audit('summarize', 'Map errors: ' + mapErrors.length);
+        mapErrors.forEach(function(error, index) {
+          log.error('summarize', 'Map error ' + (index + 1) + ': ' + (error.toString ? error.toString() : JSON.stringify(error)));
+        });
+      } else {
+        log.audit('summarize', 'Map errors: ' + (typeof mapErrors === 'object' ? JSON.stringify(mapErrors) : mapErrors));
+      }
+    } else {
+      log.audit('summarize', 'Map errors: 0');
     }
     
-    if (summaryContext.mapSummary) {
-      log.audit('summarize', 'Map errors: ' + (summaryContext.mapSummary.errors || 0));
-    }
-    
-    if (summaryContext.reduceSummary) {
-      log.audit('summarize', 'Reduce errors: ' + (summaryContext.reduceSummary.errors || 0));
+    if (summaryContext.reduceSummary && summaryContext.reduceSummary.errors) {
+      var reduceErrors = summaryContext.reduceSummary.errors;
+      if (Array.isArray(reduceErrors)) {
+        log.audit('summarize', 'Reduce errors: ' + reduceErrors.length);
+        reduceErrors.forEach(function(error, index) {
+          log.error('summarize', 'Reduce error ' + (index + 1) + ': ' + (error.toString ? error.toString() : JSON.stringify(error)));
+        });
+      } else {
+        log.audit('summarize', 'Reduce errors: ' + (typeof reduceErrors === 'object' ? JSON.stringify(reduceErrors) : reduceErrors));
+      }
+    } else {
+      log.audit('summarize', 'Reduce errors: 0');
     }
   }
   

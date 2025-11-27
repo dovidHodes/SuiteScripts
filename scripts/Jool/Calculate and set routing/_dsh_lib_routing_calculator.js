@@ -86,7 +86,7 @@ define([
       });
       
       if (!amazonLocationNumber) {
-        log.warning('Routing Calculator', 'Amazon location number not found for location ' + locationId + ' (' + locationName + '), skipping routing field population');
+        log.audit('Routing Calculator', 'Amazon location number not found for location ' + locationId + ' (' + locationName + '), skipping routing field population');
         return false;
       }
       
@@ -160,7 +160,7 @@ define([
           // Check if UPP is missing/null/empty (defaulted to 1)
           if (!uppFieldValue || uppFieldValue === 0 || uppFieldValue === '') {
             hasMissingUPP = true;
-            log.warning('Routing Calculator - Missing UPP', 
+            log.audit('Routing Calculator - Missing UPP', 
                         'Item ' + itemName + ' (ID: ' + itemId + ') has missing/null/empty units per pallet field. ' +
                         'Location: ' + locationId + ', Defaulting to 1 unit per pallet. ' +
                         'Routing status will NOT be set to 1.');
@@ -177,8 +177,8 @@ define([
           itemData.push({
             itemId: itemId,
             itemName: itemName,
-            quantity: itemQuantity,
-            unitsPerPallet: unitsPerPallet,
+            quantity: parseFloat(itemQuantity) || 0,  // Ensure quantity is a number
+            unitsPerPallet: parseFloat(unitsPerPallet) || 1,  // Ensure unitsPerPallet is a number
             individualPalletFraction: individualPalletFraction
           });
           
@@ -212,14 +212,15 @@ define([
         // Group items by units per pallet
         var palletGroups = {};
         for (var j = 0; j < itemData.length; j++) {
-          var unitsPerPallet = itemData[j].unitsPerPallet;
+          var unitsPerPallet = parseFloat(itemData[j].unitsPerPallet) || 1;  // Ensure it's a number
+          var quantity = parseFloat(itemData[j].quantity) || 0;  // Ensure it's a number
           if (!palletGroups[unitsPerPallet]) {
             palletGroups[unitsPerPallet] = {
               totalUnits: 0,
               items: []
             };
           }
-          palletGroups[unitsPerPallet].totalUnits += itemData[j].quantity;
+          palletGroups[unitsPerPallet].totalUnits += quantity;  // Now it will add, not concatenate
           palletGroups[unitsPerPallet].items.push({
             name: itemData[j].itemName,
             quantity: itemData[j].quantity
@@ -262,7 +263,8 @@ define([
         log.debug('Routing Calculator - Pallet Debug', 
                   'NEW METHOD: ' + totalPallets + ' pallets, OLD METHOD: ' + oldMethodTotalPallets + ' pallets');
         
-        totalPallets = Math.max(1, totalPallets);
+        // Use OLD METHOD (sum of individual fractions) for the actual field value
+        totalPallets = Math.max(1, oldMethodTotalPallets);
       } else {
         totalPallets = 0;
       }
@@ -273,7 +275,7 @@ define([
       log.debug('Routing Calculator', 'Totals - Cartons: ' + totalCartons + 
                 ', Vol: ' + totalVolume.toFixed(2) + ' cu ft' +
                 ', Wt: ' + totalWeight.toFixed(2) + ' lbs' +
-                ', Pallets: ' + totalPallets +
+                ', Pallets: ' + totalPallets + ' (using OLD METHOD: sum of individual fractions)' +
                 ', Request Type: ' + requestType);
       
       // Apply routing fields to IF
@@ -350,7 +352,7 @@ define([
         log.debug('Routing Calculator', 'Set routing status to 1 (ready for routing request)');
       } else {
         if (hasMissingUPP) {
-          log.warning('Routing Calculator', 
+          log.audit('Routing Calculator', 
                       'NOT setting routing status to 1 because one or more items have missing/null/empty units per pallet field. ' +
                       'Please update item UPP fields and recalculate routing.');
         } else if (!pickupDateSet) {

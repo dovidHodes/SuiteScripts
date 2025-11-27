@@ -76,18 +76,50 @@ function base64DecodePolyfill(base64) {
     return output;
 }
 
+/**
+ * NetSuite-compatible setTimeout polyfill
+ * In NetSuite's server-side environment, we execute callbacks immediately
+ * since there's no event loop. This is a synchronous polyfill.
+ * @param {Function} callback - Function to execute
+ * @param {number} delay - Delay in milliseconds (ignored in NetSuite)
+ * @returns {number} Timer ID (for compatibility)
+ */
+function setTimeoutPolyfill(callback, delay) {
+    // In NetSuite, execute immediately since we're in a synchronous environment
+    // PDFlib may use setTimeout for async operations, but we'll handle them synchronously
+    if (typeof callback === 'function') {
+        callback();
+    }
+    // Return a fake timer ID for compatibility
+    return 1;
+}
+
+/**
+ * NetSuite-compatible clearTimeout polyfill
+ * @param {number} timerId - Timer ID to clear (ignored in NetSuite)
+ */
+function clearTimeoutPolyfill(timerId) {
+    // No-op in NetSuite since we execute immediately
+}
+
 // Assign to global scope - try multiple methods for compatibility with NetSuite
 if (typeof global !== 'undefined') {
     global.btoa = base64EncodePolyfill;
     global.atob = base64DecodePolyfill;
+    global.setTimeout = setTimeoutPolyfill;
+    global.clearTimeout = clearTimeoutPolyfill;
 } else if (typeof window !== 'undefined') {
     window.btoa = base64EncodePolyfill;
     window.atob = base64DecodePolyfill;
+    window.setTimeout = setTimeoutPolyfill;
+    window.clearTimeout = clearTimeoutPolyfill;
 } else {
     // In SuiteScript, assign without var to make them global
     // This creates properties on the global object
     btoa = base64EncodePolyfill;
     atob = base64DecodePolyfill;
+    setTimeout = setTimeoutPolyfill;
+    clearTimeout = clearTimeoutPolyfill;
 }
 
 define(['N/search', 'N/record', 'N/file', 'N/url', 'N/log', 'N/runtime', './PDFlib_WRAPPED', './_dsh_lib_time_tracker'], function (search, record, file, url, log, runtime, PDFLib, timeTrackerLib) {
@@ -151,10 +183,41 @@ define(['N/search', 'N/record', 'N/file', 'N/url', 'N/log', 'N/runtime', './PDFl
         return output;
     }
     
+    /**
+     * NetSuite-compatible setTimeout polyfill (re-assigned in module scope)
+     * @param {Function} callback - Function to execute
+     * @param {number} delay - Delay in milliseconds (ignored in NetSuite)
+     * @returns {number} Timer ID (for compatibility)
+     */
+    function setTimeoutPolyfillModule(callback, delay) {
+        // In NetSuite, execute immediately since we're in a synchronous environment
+        if (typeof callback === 'function') {
+            callback();
+        }
+        return 1;
+    }
+    
+    /**
+     * NetSuite-compatible clearTimeout polyfill (re-assigned in module scope)
+     * @param {number} timerId - Timer ID to clear (ignored in NetSuite)
+     */
+    function clearTimeoutPolyfillModule(timerId) {
+        // No-op in NetSuite since we execute immediately
+    }
+    
     // Ensure they're available globally (re-assign in case the pre-define assignment didn't work)
     if (typeof global !== 'undefined') {
         global.btoa = base64EncodePolyfill;
         global.atob = base64DecodePolyfill;
+        global.setTimeout = setTimeoutPolyfillModule;
+        global.clearTimeout = clearTimeoutPolyfillModule;
+    } else {
+        // In SuiteScript, assign without var to make them global
+        // This creates properties on the global object
+        btoa = base64EncodePolyfill;
+        atob = base64DecodePolyfill;
+        setTimeout = setTimeoutPolyfillModule;
+        clearTimeout = clearTimeoutPolyfillModule;
     }
     
     /**
@@ -844,8 +907,8 @@ define(['N/search', 'N/record', 'N/file', 'N/url', 'N/log', 'N/runtime', './PDFl
     }
     
     /**
-     * Copies pages from source PDF to merged PDF one at a time
-     * This ensures all pages are copied correctly, especially for multi-page PDFs
+     * Copies pages from source PDF to merged PDF in batches
+     * This is more efficient than one-by-one and avoids execution limit issues
      * @param {Object} sourcePdfDoc - Source PDF document to copy from
      * @param {Object} mergedPdfDoc - Target PDF document to copy to
      * @param {number} pageCount - Total number of pages to copy
@@ -855,38 +918,59 @@ define(['N/search', 'N/record', 'N/file', 'N/url', 'N/log', 'N/runtime', './PDFl
      */
     function copyPagesOneByOne(sourcePdfDoc, mergedPdfDoc, pageCount, tranId, fileIndex) {
         if (pageCount === 0) {
-            log.debug('copyPagesOneByOne', 'TranID: ' + tranId + ' - No pages to copy from file ' + fileIndex);
             return Promise.resolve();
         }
         
-        // Start with the first page (index 0)
-        return copyPageRecursive(sourcePdfDoc, mergedPdfDoc, 0, pageCount, tranId, fileIndex);
+        // Use batch copying: copy pages in groups to balance efficiency and reliability
+        // For SPS PDFs that are consistently 75 pages, use larger batches for efficiency
+        // Batch size of 25 pages: 75 pages = 3 batches (25+25+25) instead of 8 batches
+        // This reduces operations by ~60% while still being safe
+        var BATCH_SIZE = 25;
+        log.debug('copyPagesOneByOne', 'TranID: ' + tranId + ' - Copying ' + pageCount + ' page(s) from file ' + fileIndex + ' in batches of ' + BATCH_SIZE);
+        
+        // Build array of all page indices
+        var allPageIndices = [];
+        for (var i = 0; i < pageCount; i++) {
+            allPageIndices.push(i);
+        }
+        
+        // Process pages in batches
+        return copyPagesInBatches(sourcePdfDoc, mergedPdfDoc, allPageIndices, BATCH_SIZE, 0, tranId, fileIndex);
     }
     
     /**
-     * Recursively copies pages one at a time
+     * Copies pages in batches recursively
      * @param {Object} sourcePdfDoc - Source PDF document
      * @param {Object} mergedPdfDoc - Target PDF document
-     * @param {number} currentPageIndex - Current page index to copy (0-based)
-     * @param {number} totalPages - Total number of pages to copy
+     * @param {Array<number>} allPageIndices - Array of all page indices to copy
+     * @param {number} batchSize - Number of pages to copy per batch
+     * @param {number} startIndex - Starting index in allPageIndices array
      * @param {string} tranId - Transaction ID for logging
      * @param {number} fileIndex - File index for logging
      * @returns {Promise} Promise that resolves when all pages are copied
      */
-    function copyPageRecursive(sourcePdfDoc, mergedPdfDoc, currentPageIndex, totalPages, tranId, fileIndex) {
-        if (currentPageIndex >= totalPages) {
+    function copyPagesInBatches(sourcePdfDoc, mergedPdfDoc, allPageIndices, batchSize, startIndex, tranId, fileIndex) {
+        if (startIndex >= allPageIndices.length) {
             // All pages copied
-            log.debug('copyPageRecursive', 'TranID: ' + tranId + ' - Finished copying all ' + totalPages + ' page(s) from file ' + fileIndex);
+            log.debug('copyPagesInBatches', 'TranID: ' + tranId + ' - Finished copying all ' + allPageIndices.length + ' page(s) from file ' + fileIndex);
             return Promise.resolve();
         }
         
+        // Get the current batch of page indices
+        var batchIndices = [];
+        var endIndex = Math.min(startIndex + batchSize, allPageIndices.length);
+        for (var i = startIndex; i < endIndex; i++) {
+            batchIndices.push(allPageIndices[i]);
+        }
+        
+        // Log progress every batch (reduced logging - only log first batch and every 2nd batch)
+        if (startIndex === 0 || (startIndex % (batchSize * 2) === 0)) {
+            log.debug('copyPagesInBatches', 'TranID: ' + tranId + ' - Copying pages ' + (startIndex + 1) + '-' + endIndex + ' of ' + allPageIndices.length + ' from file ' + fileIndex);
+        }
+        
         try {
-            // Copy one page at a time
-            var pageIndex = currentPageIndex;
-            log.debug('copyPageRecursive', 'TranID: ' + tranId + ' - Copying page ' + (pageIndex + 1) + ' of ' + totalPages + ' from file ' + fileIndex);
-            
-            // Copy the current page
-            var copiedPagesResult = mergedPdfDoc.copyPages(sourcePdfDoc, [pageIndex]);
+            // Copy the current batch of pages
+            var copiedPagesResult = mergedPdfDoc.copyPages(sourcePdfDoc, batchIndices);
             
             // Handle Promise or direct result
             var copyPromise;
@@ -897,15 +981,15 @@ define(['N/search', 'N/record', 'N/file', 'N/url', 'N/log', 'N/runtime', './PDFl
             }
             
             return copyPromise.then(function(copiedPages) {
-                // copiedPages should be an array with one page
+                // Extract pages array
                 var pagesArray = [];
                 if (Array.isArray(copiedPages)) {
                     pagesArray = copiedPages;
                 } else if (copiedPages && typeof copiedPages.length !== 'undefined') {
                     // Array-like object
-                    for (var i = 0; i < copiedPages.length; i++) {
-                        if (copiedPages[i] !== undefined && copiedPages[i] !== null) {
-                            pagesArray.push(copiedPages[i]);
+                    for (var j = 0; j < copiedPages.length; j++) {
+                        if (copiedPages[j] !== undefined && copiedPages[j] !== null) {
+                            pagesArray.push(copiedPages[j]);
                         }
                     }
                 } else if (copiedPages) {
@@ -914,42 +998,41 @@ define(['N/search', 'N/record', 'N/file', 'N/url', 'N/log', 'N/runtime', './PDFl
                 }
                 
                 if (pagesArray.length === 0) {
-                    log.error('copyPageRecursive', 'TranID: ' + tranId + ' - No pages returned from copyPages for page index ' + pageIndex);
-                    // Continue with next page
-                    return copyPageRecursive(sourcePdfDoc, mergedPdfDoc, currentPageIndex + 1, totalPages, tranId, fileIndex);
+                    log.error('copyPagesInBatches', 'TranID: ' + tranId + ' - No pages returned from copyPages for batch starting at index ' + startIndex);
+                    // Continue with next batch
+                    return copyPagesInBatches(sourcePdfDoc, mergedPdfDoc, allPageIndices, batchSize, endIndex, tranId, fileIndex);
                 }
                 
-                // Add the copied page to the merged document
-                var pageAdded = false;
-                for (var j = 0; j < pagesArray.length; j++) {
-                    var pageToAdd = pagesArray[j];
+                // Add all pages from this batch to the merged document
+                var addedCount = 0;
+                for (var k = 0; k < pagesArray.length; k++) {
+                    var pageToAdd = pagesArray[k];
                     if (pageToAdd && typeof pageToAdd === 'object' && pageToAdd !== null) {
                         try {
                             mergedPdfDoc.addPage(pageToAdd);
-                            pageAdded = true;
-                            log.debug('copyPageRecursive', 'TranID: ' + tranId + ' - Successfully added page ' + (pageIndex + 1) + ' of ' + totalPages + ' from file ' + fileIndex);
+                            addedCount++;
                         } catch (addError) {
-                            log.error('copyPageRecursive', 'TranID: ' + tranId + ' - Error adding page ' + (pageIndex + 1) + ': ' + addError.toString());
+                            log.error('copyPagesInBatches', 'TranID: ' + tranId + ' - Error adding page from batch: ' + addError.toString());
                         }
                     }
                 }
                 
-                if (!pageAdded) {
-                    log.error('copyPageRecursive', 'TranID: ' + tranId + ' - Failed to add page ' + (pageIndex + 1) + ' from file ' + fileIndex);
+                if (addedCount !== pagesArray.length) {
+                    log.error('copyPagesInBatches', 'TranID: ' + tranId + ' - Only added ' + addedCount + ' of ' + pagesArray.length + ' page(s) from batch');
                 }
                 
-                // Recursively copy the next page
-                return copyPageRecursive(sourcePdfDoc, mergedPdfDoc, currentPageIndex + 1, totalPages, tranId, fileIndex);
+                // Continue with next batch
+                return copyPagesInBatches(sourcePdfDoc, mergedPdfDoc, allPageIndices, batchSize, endIndex, tranId, fileIndex);
             }).catch(function(copyError) {
-                log.error('copyPageRecursive', 'TranID: ' + tranId + ' - Error copying page ' + (pageIndex + 1) + ' from file ' + fileIndex + ': ' + copyError.toString());
-                // Continue with next page even if this one failed
-                return copyPageRecursive(sourcePdfDoc, mergedPdfDoc, currentPageIndex + 1, totalPages, tranId, fileIndex);
+                log.error('copyPagesInBatches', 'TranID: ' + tranId + ' - Error copying batch starting at index ' + startIndex + ': ' + copyError.toString());
+                // Continue with next batch even if this one failed
+                return copyPagesInBatches(sourcePdfDoc, mergedPdfDoc, allPageIndices, batchSize, endIndex, tranId, fileIndex);
             });
             
         } catch (error) {
-            log.error('copyPageRecursive', 'TranID: ' + tranId + ' - Error in copyPageRecursive for page ' + (currentPageIndex + 1) + ': ' + error.toString());
-            // Continue with next page
-            return copyPageRecursive(sourcePdfDoc, mergedPdfDoc, currentPageIndex + 1, totalPages, tranId, fileIndex);
+            log.error('copyPagesInBatches', 'TranID: ' + tranId + ' - Error in copyPagesInBatches for batch starting at index ' + startIndex + ': ' + error.toString());
+            // Continue with next batch
+            return copyPagesInBatches(sourcePdfDoc, mergedPdfDoc, allPageIndices, batchSize, endIndex, tranId, fileIndex);
         }
     }
     
