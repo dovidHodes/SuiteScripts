@@ -5,27 +5,26 @@
 **All scheduled automation scripts follow this pattern:**
 
 ```
-Column 1:                    Column 2:                    Column 3:
 Automated Path              Suitelet Path                 Button UI
-┌─────────────┐             ┌─────────────────────┐      ┌─────────────┐
-│  Scheduled  │             │ manual link trigger  │      │ User Event  │
-│  Script     │             └─────────────────────┘      │    (UE)     │
-│  (SCH)      │                       │                   └──────┬──────┘
-└──────┬──────┘                       │                          │
-       │ task.create()                │                          │ click
-       ↓                              │                          ↓
-┌─────────────┐                       │                  ┌─────────────┐
+┌─────────────┐            ┌─────────────────────┐      ┌─────────────┐
+│  Scheduled  │            │Dynamic URL in record│      │ User Event  │
+│  Script     │            └─────────────────────┘      │    (UE)     │
+│  (SCH)      │                    │                    └──────┬──────┘
+└──────┬──────┘                    │                           │
+       │ task.create()             │                           │ click
+       ↓                           │                           ↓
+┌─────────────┐                    │                    ┌─────────────┐
 │ Map/Reduce  │             ┌─────────────┐             │   Client    │
-│   Script    │             │  Suitelet   │ ←──────────│   Script    │
+│   Script    │             │  Suitelet   │ ←────────── │   Script    │
 │    (MR)     │             │    (SL)     │             │    (CL)     │
 └──────┬──────┘             └──────┬──────┘             └─────────────┘
-       │                              │
-       │ direct call                  │ direct call
-       ↓                              ↓
-       ┌──────────────────────────────────┐
-       │        Library Script            │
-       │     (Core business logic)        │
-       └──────────────────────────────────┘
+       │                           │
+       │ direct call               │ direct call
+       ↓                           ↓
+┌───────────────────────────────────────────┐
+│              Library Script               │
+│           (Core functionality)            │
+└───────────────────────────────────────────┘
 ```
 
 ### Why This Pattern?
