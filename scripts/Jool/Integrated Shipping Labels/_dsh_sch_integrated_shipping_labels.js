@@ -165,7 +165,10 @@ define(['N/search', 'N/log', 'N/record', 'N/task', 'N/runtime'], function (searc
                             var needsRouting = customerRecord.getValue('custentity_needs_routing');
                             if (needsRouting === true || needsRouting === 'T') {
                                 log.debug('execute', 'Entity ' + entityId + ' needs routing, checking routing_status');
-                                if (routingStatus !== 3) {
+                                // Convert to number for comparison (handles both string "3" and number 3)
+                                var routingStatusNum = parseInt(routingStatus, 10);
+                                log.debug('execute', 'IF ' + tranId + ' - routing_status value: ' + routingStatus + ' (type: ' + typeof routingStatus + '), as number: ' + routingStatusNum);
+                                if (routingStatusNum !== 3) {
                                     log.debug('execute', 'IF ' + tranId + ' - Entity needs routing but routing_status is ' + routingStatus + ' (needs 3), skipping');
                                     skippedCount++;
                                     processedIFIds[ifIdStr] = true;
