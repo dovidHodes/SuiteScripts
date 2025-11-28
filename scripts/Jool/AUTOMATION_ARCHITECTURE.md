@@ -2,6 +2,13 @@
 
 **Try to use as many as needed:**
 
+- Scheduled Script (SCH)
+- Map/Reduce Script (MR)
+- Library Script
+- Suitelet (SL)
+- User Event (UE)
+- Client Script (CL)
+
 ```
 Automated Path              Suitelet Path                 Button UI
 ┌─────────────┐            ┌─────────────────────┐      ┌─────────────┐
@@ -33,37 +40,37 @@ Automated Path              Suitelet Path                 Button UI
 ## Script Types
 
 - **1. Scheduled Script (SCH)**
-- Entity filtering
+  - Entity filtering
   - Field validation
   - Duplicate prevention
   - Batching logic
   - **Multiple MR deployment management** (tries all if one is busy)
-- **Sets workflow flags** before scheduling MR
+  - **Sets workflow flags** before scheduling MR
 
 - **2. Map/Reduce Script (MR)**
-- Receives record IDs from SCH via parameters
+  - Receives record IDs from SCH via parameters
   - Calls library function for each record
   - Sets completion flags after success
   - Resets flags on failure (for retry)
 
 - **3. Library Script**
-- Reusable from MR, Suitelet, User Event, RESTlet
+  - Reusable from MR, Suitelet, User Event, RESTlet
   - Contains all processing logic
   - Returns success/error status
 
 - **4. Suitelet (SL)**
-- Validates same criteria as SCH
+  - Validates same criteria as SCH
   - Calls library directly
   - Returns JSON response
   - Can be triggered from link on record (without UE/CL)
 
 - **5. User Event (UE)**
-- Adds UI element to record form
+  - Adds UI element to record form
   - Sets Client Script module path
   - Only needed for button UI (not for direct links)
 
 - **6. Client Script (CL)**
-- Handles button click event
+  - Handles button click event
   - Calls Suitelet via HTTP
   - Shows success/error messages
   - Reloads page on success
