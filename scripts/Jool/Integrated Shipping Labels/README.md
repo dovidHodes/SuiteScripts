@@ -53,6 +53,24 @@ This automation follows the **SCH → MR → Library** pattern:
 - **Purpose**: Core business logic for creating integrated shipping labels
 - **Functions**:
   - `createIntegratedShippingLabels(ifId)` - Main function
+
+### `_dsh_sl_integrated_shipping_labels.js`
+- **Type**: Suitelet
+- **Purpose**: HTTP endpoint for button-triggered integrated shipping labels creation
+- **Called By**: Client Script (button click)
+- **Calls**: Library Script
+- **Validates**: Same criteria as SCH script before processing
+
+### `_dsh_ue_if_integrated_labels_button.js`
+- **Type**: User Event Script
+- **Purpose**: Adds "Create Integrated Shipping Labels" button to Item Fulfillment form
+- **Deployed On**: Item Fulfillment record
+- **Event**: beforeLoad (View mode only)
+
+### `_dsh_cs_integrated_labels_button.js`
+- **Type**: Client Script
+- **Purpose**: Handles button click, calls Suitelet, shows success/error messages
+- **Calls**: Suitelet via HTTP (fetch API)
 - **Process**:
   1. Sets IF status to "Packed"
   2. Sets shipcarrier from `custentity_carrier_type` (text values)
@@ -133,16 +151,17 @@ This automation follows the **SCH → MR → Library** pattern:
    - Creates package lines with dimensions
    - Sets carton numbers, reference2, and shipmethod
 
-### Manual Flow (Future Suitelet)
-A Suitelet can be created to call the library directly for button-triggered processing:
-```javascript
-// Suitelet example
-function onRequest(context) {
-  var ifId = context.request.parameters.ifId;
-  var result = integratedLabelsLib.createIntegratedShippingLabels(ifId);
-  context.response.write(JSON.stringify(result));
-}
-```
+### Manual Flow (Button-Triggered)
+1. User views Item Fulfillment record
+2. User Event script adds "Create Integrated Shipping Labels" button
+3. User clicks button
+4. Client Script calls Suitelet via HTTP
+5. Suitelet validates same criteria as SCH script
+6. Suitelet calls Library Script function
+7. Library Script creates package lines from SPS packages
+8. Suitelet returns JSON response
+9. Client Script shows success/error message
+10. Page reloads to show updated package lines
 
 ## Key Features
 
