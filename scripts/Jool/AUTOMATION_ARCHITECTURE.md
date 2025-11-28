@@ -27,6 +27,11 @@ Automated Path              Suitelet Path                 Button UI
 └───────────────────────────────────────────┘
 ```
 
+- **Effective Batching**: SCH batches records before calling MR  
+- **Button Support**: Library can be called from Suitelet (button/link)  
+- **Deployment Management**: SCH tries multiple MR deployments if one is busy  
+- **Code Reusability**: Same library logic for automated + manual triggers  
+
 ## Components
 
 ### 1. Scheduled Script (SCH)
