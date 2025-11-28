@@ -1,8 +1,6 @@
 # Automation Architecture Pattern
 
-## Standard Pattern: SCH → MR → Library
-
-**All scheduled automation scripts follow this pattern:**
+**Try to use as many as needed:**
 
 ```
 Automated Path              Suitelet Path                 Button UI
@@ -32,9 +30,9 @@ Automated Path              Suitelet Path                 Button UI
 - **Deployment Management**: SCH tries multiple MR deployments if one is busy  
 - **Code Reusability**: Same library logic for automated + manual triggers  
 
-## Components
+## Script Types
 
-#### 1. Scheduled Script (SCH)
+- **1. Scheduled Script (SCH)**
 - Entity filtering
   - Field validation
   - Duplicate prevention
@@ -42,29 +40,29 @@ Automated Path              Suitelet Path                 Button UI
   - **Multiple MR deployment management** (tries all if one is busy)
 - **Sets workflow flags** before scheduling MR
 
-#### 2. Map/Reduce Script (MR)
+- **2. Map/Reduce Script (MR)**
 - Receives record IDs from SCH via parameters
   - Calls library function for each record
   - Sets completion flags after success
   - Resets flags on failure (for retry)
 
-#### 3. Library Script
+- **3. Library Script**
 - Reusable from MR, Suitelet, User Event, RESTlet
   - Contains all processing logic
   - Returns success/error status
 
-#### 4. Suitelet (SL)
+- **4. Suitelet (SL)**
 - Validates same criteria as SCH
   - Calls library directly
   - Returns JSON response
   - Can be triggered from link on record (without UE/CL)
 
-#### 5. User Event (UE)
+- **5. User Event (UE)**
 - Adds UI element to record form
   - Sets Client Script module path
   - Only needed for button UI (not for direct links)
 
-#### 6. Client Script (CL)
+- **6. Client Script (CL)**
 - Handles button click event
   - Calls Suitelet via HTTP
   - Shows success/error messages
