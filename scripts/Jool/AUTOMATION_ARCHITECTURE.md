@@ -5,27 +5,23 @@
 **All scheduled automation scripts follow this pattern:**
 
 ```
-Automated Path:                    Manual Path (Button/Trigger):
-┌─────────────┐                   ┌─────────────┐
-│  Scheduled  │                   │ User Event  │
-│  Script     │                   │  (UE)       │
-│  (SCH)      │                   └──────┬──────┘
-└──────┬──────┘                          │
-       │ task.create()                   │ click
-       ↓                                  ↓
-┌─────────────┐                   ┌─────────────┐
-│ Map/Reduce  │                   │   Client    │
-│   Script    │                   │   Script    │
-│    (MR)     │                   │    (CL)     │
-└──────┬──────┘                   └──────┬──────┘
-       │                                  │ HTTP
-       │ direct call                      ↓
-       │                          ┌─────────────┐
-       │                          │  Suitelet   │ ← can trigger from link on record
-       │                          │    (SL)     │
-       │                          └──────┬──────┘
-       │                                  │ direct call
-       ↓                                  ↓
+Column 1:                    Column 2:                    Column 3:
+Automated Path              Suitelet Path                 Button UI
+┌─────────────┐             ┌─────────────────────┐      ┌─────────────┐
+│  Scheduled  │             │ manual link trigger  │      │ User Event  │
+│  Script     │             └─────────────────────┘      │    (UE)     │
+│  (SCH)      │                       │                   └──────┬──────┘
+└──────┬──────┘                       │                          │
+       │ task.create()                │                          │ click
+       ↓                              │                          ↓
+┌─────────────┐                       │                  ┌─────────────┐
+│ Map/Reduce  │             ┌─────────────┐             │   Client    │
+│   Script    │             │  Suitelet   │ ←──────────│   Script    │
+│    (MR)     │             │    (SL)     │             │    (CL)     │
+└──────┬──────┘             └──────┬──────┘             └─────────────┘
+       │                              │
+       │ direct call                  │ direct call
+       ↓                              ↓
        ┌──────────────────────────────────┐
        │        Library Script            │
        │     (Core business logic)        │
