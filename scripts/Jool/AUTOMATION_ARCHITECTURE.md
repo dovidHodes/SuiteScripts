@@ -5,6 +5,7 @@
 **All scheduled automation scripts follow this pattern:**
 
 ```
+Automated Path (Scheduled):
 ┌─────────────┐
 │  Scheduled  │  Finds records, validates, batches
 │  Script     │  Tries multiple MR deployments
@@ -20,6 +21,30 @@
 ┌─────────────┐
 │   Library   │  Core business logic
 │   Script    │  Reusable from anywhere
+└─────────────┘
+
+Manual Path (Button/Trigger):
+┌─────────────┐
+│ User Event  │  Adds button to IF form
+│  + Button   │
+└──────┬──────┘
+       │ click
+       ↓
+┌─────────────┐
+│   Client    │  Handles click, calls Suitelet
+│   Script    │  Shows success/error messages
+└──────┬──────┘
+       │ HTTP request
+       ↓
+┌─────────────┐
+│  Suitelet   │  Validates criteria, calls library
+│   (SL)      │  Returns JSON response
+└──────┬──────┘
+       │ direct call
+       ↓
+┌─────────────┐
+│   Library   │  Same core business logic
+│   Script    │  (shared with automated path)
 └─────────────┘
 ```
 
