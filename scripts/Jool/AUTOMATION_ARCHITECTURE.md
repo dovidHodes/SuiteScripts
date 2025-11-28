@@ -34,8 +34,7 @@ Automated Path              Suitelet Path                 Button UI
 
 ## Components
 
-### 1. Scheduled Script (SCH)
-- **Purpose**: Find records, validate, batch, schedule MR
+#### 1. Scheduled Script (SCH)
 - **Key Features**:
   - Entity filtering
   - Field validation
@@ -44,38 +43,33 @@ Automated Path              Suitelet Path                 Button UI
   - **Multiple MR deployment management** (tries all if one is busy)
 - **Sets workflow flags** before scheduling MR
 
-### 2. Map/Reduce Script (MR)
-- **Purpose**: Orchestrate bulk processing
+#### 2. Map/Reduce Script (MR)
 - **Key Features**:
   - Receives record IDs from SCH via parameters
   - Calls library function for each record
   - Sets completion flags after success
   - Resets flags on failure (for retry)
 
-### 3. Library Script
-- **Purpose**: Core business logic
+#### 3. Library Script
 - **Key Features**:
   - Reusable from MR, Suitelet, User Event, RESTlet
   - Contains all processing logic
   - Returns success/error status
 
-### 4. Suitelet (SL)
-- **Purpose**: HTTP endpoint for button/link triggers
+#### 4. Suitelet (SL)
 - **Key Features**:
   - Validates same criteria as SCH
   - Calls library directly
   - Returns JSON response
   - Can be triggered from link on record (without UE/CL)
 
-### 5. User Event (UE)
-- **Purpose**: Adds button/link to form
+#### 5. User Event (UE)
 - **Key Features**:
   - Adds UI element to record form
   - Sets Client Script module path
   - Only needed for button UI (not for direct links)
 
-### 6. Client Script (CL)
-- **Purpose**: Handles button click, shows messages
+#### 6. Client Script (CL)
 - **Key Features**:
   - Handles button click event
   - Calls Suitelet via HTTP
