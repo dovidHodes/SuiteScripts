@@ -293,7 +293,7 @@ Script for deleting package records (diagnostic/utility script).
 ## Documentation
 
 ### Architecture & Patterns
-- **scripts/AUTOMATION_ARCHITECTURE.md**: Comprehensive guide to automation patterns (SCH→MR vs Library→MR)
+- **scripts/Jool/AUTOMATION_ARCHITECTURE.md**: Comprehensive guide to automation patterns (SCH→MR→Library standard pattern)
 - **scripts/Jool/NS_TROUBLESHOOTING_GUIDE.md**: NetSuite troubleshooting guide with common issues and solutions
 
 ### Customer-Specific Documentation
@@ -310,7 +310,7 @@ Script for deleting package records (diagnostic/utility script).
 ## Getting Started
 
 1. Clone this repository
-2. Review **AUTOMATION_ARCHITECTURE.md** to understand automation patterns
+2. Review **Jool/AUTOMATION_ARCHITECTURE.md** to understand automation patterns
 3. Review the troubleshooting guides for common NetSuite development patterns
 4. Use the EDI error record reference for consistent error handling
 5. Deploy scripts to your NetSuite environment
@@ -319,12 +319,13 @@ Script for deleting package records (diagnostic/utility script).
 
 ## Automation Patterns
 
-This codebase follows two main automation patterns documented in `scripts/AUTOMATION_ARCHITECTURE.md`:
+This codebase follows the **SCH → MR → Library** pattern documented in `scripts/Jool/AUTOMATION_ARCHITECTURE.md`:
 
-1. **SCH → MR Pattern**: Scheduled Script calls Map/Reduce (for complex pre-processing)
-2. **Library → MR Pattern**: Library code called by MR (for maximum reusability)
+- **Scheduled Script** finds records, validates, batches, and schedules MR
+- **Map/Reduce Script** orchestrates bulk processing and calls library
+- **Library Script** contains core business logic (reusable from MR, Suitelet, User Event)
 
-**Default Recommendation**: Use Library → MR pattern unless you need complex pre-processing, multiple deployments, or advanced batching.
+**Benefits**: Effective batching, button support via Suitelet, deployment management, code reusability.
 
 ## Error Handling Architecture
 
