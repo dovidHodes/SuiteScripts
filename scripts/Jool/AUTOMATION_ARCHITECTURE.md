@@ -27,13 +27,6 @@ Automated Path              Suitelet Path                 Button UI
 └───────────────────────────────────────────┘
 ```
 
-### Why This Pattern?
-
-✅ **Effective Batching**: SCH batches records before calling MR  
-✅ **Button Support**: Library can be called from Suitelet (button/link)  
-✅ **Deployment Management**: SCH tries multiple MR deployments if one is busy  
-✅ **Code Reusability**: Same library logic for automated + manual triggers  
-
 ## Components
 
 ### 1. Scheduled Script (SCH)
@@ -100,14 +93,6 @@ To add a button/link on IF record:
 
 ## Examples
 
-### Integrated Shipping Labels
-- **SCH**: `_dsh_sch_integrated_shipping_labels.js`
-- **MR**: `_dsh_mr_integrated_shipping_labels.js`
-- **Library**: `_dsh_lib_integrated_shipping_labels.js`
-- **Suitelet**: `_dsh_sl_integrated_shipping_labels.js`
-- **User Event**: `_dsh_ue_if_integrated_labels_button.js`
-- **Client Script**: `_dsh_cs_integrated_labels_button.js`
-
 ### Autopack
 - **SCH**: `autopackScheduled.js`
 - **MR**: SPS autopack MR (11 deployments)
@@ -120,13 +105,13 @@ To add a button/link on IF record:
 
 ## Best Practices
 
-1. **Always use SCH → MR → Library pattern** for scheduled automation
-2. **Create multiple MR deployments** (0-10 or more)
-3. **Try all deployments** in SCH if one is busy
-4. **Set workflow flags in SCH** before scheduling MR
-5. **Set completion flags in MR** after library success
-6. **Library should NOT set workflow flags** (that's orchestration logic)
-7. **Suitelet validates same criteria** as SCH before calling library
+- **Always use SCH → MR → Library pattern** for scheduled automation
+- **Create multiple MR deployments** (0-10 or more)
+- **Try all deployments** in SCH if one is busy
+- **Set workflow flags in SCH** before scheduling MR
+- **Set completion flags in MR** after library success
+- **Library should NOT set workflow flags** (that's orchestration logic)
+- **Suitelet validates same criteria** as SCH before calling library
 
 ---
 
