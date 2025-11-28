@@ -27,13 +27,20 @@ NetSuite automation scripts and utilities for EDI processing, invoice management
     │   └── time tracker/               # Time tracking library and documentation
     └── AGA/                            # AGA customer-specific scripts
         ├── Approve EDI button/         # EDI approval button functionality
+        ├── EDI Approval/               # EDI approval automation scripts
+        │   ├── setIFasReadyToSend.js   # Set Item Fulfillments as ready to send
+        │   └── setInvoiceAsReadyToSend.js # Auto-approve invoices for EDI transmission
+        ├── Package Management/         # Package management utilities
+        │   └── deletePackages.js      # Package deletion script
         ├── PGA Department Validation/ # PGA department validation User Event
+        ├── POD Retrieval/              # Proof of Delivery document retrieval
+        │   ├── retrieve_and_attach_PODs.js # FedEx POD document retrieval Suitelet
+        │   └── wmSecheduledGetPODs.js # Scheduled POD retrieval script
         ├── reconcilePackages/          # Package reconciliation scripts
-        ├── deletePackages.js           # Package deletion script
-        ├── retrieve_and_attach_PODs.js # FedEx POD document retrieval
-        ├── setIFasReadyToSend.js       # Set Item Fulfillments as ready to send
-        ├── setInvoiceAsReadyToSend.js  # Auto-approve invoices for EDI transmission
-        └── wmSecheduledGetPODs.js      # Scheduled POD retrieval
+        ├── Set Shipped Datetime/       # Set shipped datetime automation
+        ├── Sync IF Dates/              # Item Fulfillment date synchronization
+        └── Webscraping/                # Web scraping utilities
+            └── RESTlet/                # RESTlet scripts for web scraping
 ```
 
 ## Scripts
@@ -221,57 +228,45 @@ SPS Commerce integration scripts for autopack, batch printing, and Item Fulfillm
 
 ## AGA Scripts
 
-### setInvoiceAsReadyToSend.js
+### Approve EDI Button
+Button-triggered EDI approval functionality for Item Fulfillments.
+
+**Key Features:**
+- Client-side button rendering
+- Server-side approval processing
+- EDI toggle functionality
+
+**Files:**
+- `approveRecordForEdiFromButtonClick.js` - Server-side approval handler
+- `ediToggleClient.js` - Client script for EDI toggle
+- `renderCustomerApproveEDIButton.js` - Button rendering script
+
+### EDI Approval
+Automated EDI approval scripts for Item Fulfillments and Invoices.
+
+#### setInvoiceAsReadyToSend.js
 Scheduled script that automatically processes invoices for EDI transmission approval by verifying sibling Item Fulfillment shipping status and applying customer-specific business logic. Failed processing attempts are logged through EDI error records with trading partner identification.
 
-#### Custom Logic
-• TP Target (entity 546) invoices have their integration status set to 9 and bypass EDI approval entirely
+**Custom Logic:**
+- TP Target (entity 546) invoices have their integration status set to 9 and bypass EDI approval entirely
 
-### setIFasReadyToSend.js
+**Files:**
+- `EDI Approval/setInvoiceAsReadyToSend.js` - Invoice EDI approval automation
+
+#### setIFasReadyToSend.js
 Scheduled script that automatically approves Item Fulfillments for EDI transmission. Processes IFs from a saved search and applies customer-specific logic before setting the EDI approval field.
 
-#### Custom Logic
-• Menards (entity 545): Sets ASN status to 16 when PO Type is 'DR'
+**Custom Logic:**
+- Menards (entity 545): Sets ASN status to 16 when PO Type is 'DR'
 
-### retrieve_and_attach_PODs.js
-Suitelet for automated FedEx POD (Proof of Delivery) document retrieval and attachment to package records. Processes tracking numbers through the FedEx API to fetch POD documents and automatically attaches them to the corresponding NetSuite package records. Includes comprehensive error handling with EDI error record creation and dynamic account number mapping based on Walmart DC numbers.
+**Files:**
+- `EDI Approval/setIFasReadyToSend.js` - Item Fulfillment EDI approval automation
 
-#### Key Features
-• **FedEx API Integration**: OAuth token authentication and document retrieval
-• **Dynamic Date Range**: Based on package creation date (start = creation date, end = creation date + 1 month)
-• **Account Number Mapping**: Walmart DC number to FedEx account number lookup via custom transaction record
-• **Comprehensive Error Handling**: Centralized error handling with single error record creation
-• **File Attachment**: Automatic PDF creation and attachment to package records
-• **Status Updates**: Real-time package record status and message updates
+### Package Management
+Package management utilities and diagnostic tools.
 
-#### Custom Logic
-• **Walmart DC Validation**: Must be exactly 4 digits (numeric only)
-• **Carrier Detection**: Automatic UPS vs FedEx detection based on tracking number format
-• **Error Record Creation**: Action ID 9 for "Fetch PODs" with package record reference
-• **Safety Net Error Handling**: Main catch block ensures all errors are tracked
-
-#### Required Script Parameters
-• `custscript_fedex_api_key`: FedEx API key
-• `custscript_fedex_secret_key`: FedEx API secret key
-• `custscript_account_mapping_record`: ID of account mapping record
-
-### wmSecheduledGetPODs.js
-Scheduled script that processes packages from a saved search and calls the POD retrieval suitelet for each package. Generates suitelet URLs dynamically and handles tracking number validation and error reporting.
-
-#### Key Features
-• **Deduplication Logic**: Prevents processing duplicate packages from saved search joins
-• **Dynamic URL Generation**: Creates fully qualified HTTPS URLs for suitelet calls
-• **Comprehensive Error Handling**: Tracks processing statistics and error reporting
-• **Progress Monitoring**: Detailed logging and progress reporting
-
-#### Custom Logic
-• **Package Deduplication**: Uses Set to track processed package IDs
-• **URL Construction**: Manual HTTPS URL building for NetSuite compatibility
-• **Tracking Number Validation**: Skips packages without tracking numbers
-• **Processing Statistics**: Tracks total, processed, success, error, and skipped counts
-
-#### Required Script Parameters
-• `custscript_saved_search_id`: ID of saved search containing packages to process
+**Files:**
+- `Package Management/deletePackages.js` - Package deletion utility script
 
 ### PGA Department Validation
 User Event script that validates department information on transactions for PGA (Professional Golfers' Association) compliance.
@@ -282,13 +277,87 @@ User Event script that validates department information on transactions for PGA 
 - Record link generation for error reporting
 
 **Files:**
-- `aga_ue_department_validation.js` - User Event script for department validation
+- `PGA Department Validation/aga_ue_department_validation.js` - User Event script for department validation
 
-### deletePackages.js
-Script for deleting package records (diagnostic/utility script).
+### POD Retrieval
+Proof of Delivery document retrieval and attachment automation.
+
+#### retrieve_and_attach_PODs.js
+Suitelet for automated FedEx POD (Proof of Delivery) document retrieval and attachment to package records. Processes tracking numbers through the FedEx API to fetch POD documents and automatically attaches them to the corresponding NetSuite package records. Includes comprehensive error handling with EDI error record creation and dynamic account number mapping based on Walmart DC numbers.
+
+**Key Features:**
+- **FedEx API Integration**: OAuth token authentication and document retrieval
+- **Dynamic Date Range**: Based on package creation date (start = creation date, end = creation date + 1 month)
+- **Account Number Mapping**: Walmart DC number to FedEx account number lookup via custom transaction record
+- **Comprehensive Error Handling**: Centralized error handling with single error record creation
+- **File Attachment**: Automatic PDF creation and attachment to package records
+- **Status Updates**: Real-time package record status and message updates
+
+**Custom Logic:**
+- **Walmart DC Validation**: Must be exactly 4 digits (numeric only)
+- **Carrier Detection**: Automatic UPS vs FedEx detection based on tracking number format
+- **Error Record Creation**: Action ID 9 for "Fetch PODs" with package record reference
+- **Safety Net Error Handling**: Main catch block ensures all errors are tracked
+
+**Required Script Parameters:**
+- `custscript_fedex_api_key`: FedEx API key
+- `custscript_fedex_secret_key`: FedEx API secret key
+- `custscript_account_mapping_record`: ID of account mapping record
 
 **Files:**
-- `deletePackages.js` - Package deletion utility
+- `POD Retrieval/retrieve_and_attach_PODs.js` - POD retrieval Suitelet
+
+#### wmSecheduledGetPODs.js
+Scheduled script that processes packages from a saved search and calls the POD retrieval suitelet for each package. Generates suitelet URLs dynamically and handles tracking number validation and error reporting.
+
+**Key Features:**
+- **Deduplication Logic**: Prevents processing duplicate packages from saved search joins
+- **Dynamic URL Generation**: Creates fully qualified HTTPS URLs for suitelet calls
+- **Comprehensive Error Handling**: Tracks processing statistics and error reporting
+- **Progress Monitoring**: Detailed logging and progress reporting
+
+**Custom Logic:**
+- **Package Deduplication**: Uses Set to track processed package IDs
+- **URL Construction**: Manual HTTPS URL building for NetSuite compatibility
+- **Tracking Number Validation**: Skips packages without tracking numbers
+- **Processing Statistics**: Tracks total, processed, success, error, and skipped counts
+
+**Required Script Parameters:**
+- `custscript_saved_search_id`: ID of saved search containing packages to process
+
+**Files:**
+- `POD Retrieval/wmSecheduledGetPODs.js` - Scheduled POD retrieval script
+
+### reconcilePackages
+Package reconciliation scripts for syncing SPS packages with Item Fulfillment package sublists.
+
+**Key Features:**
+- Button-triggered package reconciliation
+- Client-side button rendering
+- Server-side reconciliation processing
+
+**Files:**
+- `reconcilePackages/reconcilePackagesClient.js` - Client script for button handling
+- `reconcilePackages/reconcilePackagesSuitelet (1).js` - Suitelet for package reconciliation
+- `reconcilePackages/renderReconcileButton.js` - Button rendering script
+
+### Set Shipped Datetime
+Automated setting of shipped datetime on Item Fulfillments.
+
+**Files:**
+- `Set Shipped Datetime/aga_ue_set_shipped_datetime.js` - User Event script for setting shipped datetime
+
+### Sync IF Dates
+Item Fulfillment date synchronization automation.
+
+**Files:**
+- `Sync IF Dates/aga_ue_sync_if_dates.js` - User Event script for date synchronization
+
+### Webscraping
+Web scraping utilities and RESTlet scripts.
+
+**Files:**
+- `Webscraping/RESTlet/MarketplaceListingsWebScraperFunctions.js` - RESTlet functions for marketplace listings web scraping
 
 ## Documentation
 
