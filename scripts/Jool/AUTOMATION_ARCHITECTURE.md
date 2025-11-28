@@ -96,18 +96,6 @@ To add a button/link on IF record:
 
 **Alternative**: Suitelet can be triggered directly from a link on the record (without UE/CL), but won't show messages in the UI.
 
-## Examples
-
-### Autopack
-- **SCH**: `autopackScheduled.js`
-- **MR**: SPS autopack MR (11 deployments)
-- **Pre-processing**: Entity filtering, routing checks, date filters
-
-### Batch Print Labels
-- **SCH**: `_dsh_sch_batch_print_labels.js`
-- **MR**: SPS batch label MR (11 deployments)
-- **Pre-processing**: Entity filtering, multi-field validation
-
 ## Best Practices
 
 - **Always use SCH → MR → Library pattern** for scheduled automation
@@ -120,5 +108,3 @@ To add a button/link on IF record:
 
 ---
 
-**Last Updated**: 2025-01-XX  
-**Maintained By**: Development Team
