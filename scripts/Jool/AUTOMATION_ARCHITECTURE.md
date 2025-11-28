@@ -5,47 +5,31 @@
 **All scheduled automation scripts follow this pattern:**
 
 ```
-Automated Path (Scheduled):
-┌─────────────┐
-│  Scheduled  │  Finds records, validates, batches
-│  Script     │  Tries multiple MR deployments
-└──────┬──────┘
-       │ task.create()
-       ↓
-┌─────────────┐
-│ Map/Reduce  │  Receives IF IDs, orchestrates
-│   Script    │  Calls library for each record
-└──────┬──────┘
-       │ direct call
-       ↓
-┌─────────────┐
-│   Library   │  Core business logic
-│   Script    │  Reusable from anywhere
-└─────────────┘
-
-Manual Path (Button/Trigger):
-┌─────────────┐
-│ User Event  │  Adds button to IF form
-│  + Button   │
-└──────┬──────┘
-       │ click
-       ↓
-┌─────────────┐
-│   Client    │  Handles click, calls Suitelet
-│   Script    │  Shows success/error messages
-└──────┬──────┘
-       │ HTTP request
-       ↓
-┌─────────────┐
-│  Suitelet   │  Validates criteria, calls library
-│   (SL)      │  Returns JSON response
-└──────┬──────┘
-       │ direct call
-       ↓
-┌─────────────┐
-│   Library   │  Same core business logic
-│   Script    │  (shared with automated path)
-└─────────────┘
+Automated Path:                    Manual Path (Button/Trigger):
+┌─────────────┐                   ┌─────────────┐
+│  Scheduled  │                   │ User Event  │
+│  Script     │                   │  (UE)       │
+│  (SCH)      │                   └──────┬──────┘
+└──────┬──────┘                          │
+       │ task.create()                   │ click
+       ↓                                  ↓
+┌─────────────┐                   ┌─────────────┐
+│ Map/Reduce  │                   │   Client    │
+│   Script    │                   │   Script    │
+│    (MR)     │                   │    (CL)     │
+└──────┬──────┘                   └──────┬──────┘
+       │                                  │ HTTP
+       │ direct call                      ↓
+       │                          ┌─────────────┐
+       │                          │  Suitelet   │ ← can trigger from link on record
+       │                          │    (SL)     │
+       │                          └──────┬──────┘
+       │                                  │ direct call
+       ↓                                  ↓
+       ┌──────────────────────────────────┐
+       │        Library Script            │
+       │     (Core business logic)        │
+       └──────────────────────────────────┘
 ```
 
 ### Why This Pattern?
@@ -82,44 +66,32 @@ Manual Path (Button/Trigger):
   - Contains all processing logic
   - Returns success/error status
 
-### 4. Suitelet (Optional - for buttons)
+### 4. Suitelet (SL)
 - **Purpose**: HTTP endpoint for button/link triggers
 - **Key Features**:
   - Validates same criteria as SCH
   - Calls library directly
   - Returns JSON response
-  - Used with User Event + Client Script for UI
+  - Can be triggered from link on record (without UE/CL)
+
+### 5. User Event (UE)
+- **Purpose**: Adds button/link to form
+- **Key Features**:
+  - Adds UI element to record form
+  - Sets Client Script module path
+  - Only needed for button UI (not for direct links)
+
+### 6. Client Script (CL)
+- **Purpose**: Handles button click, shows messages
+- **Key Features**:
+  - Handles button click event
+  - Calls Suitelet via HTTP
+  - Shows success/error messages
+  - Reloads page on success
 
 ## Multiple MR Deployments
 
-**Always create multiple MR deployments** and try them all in SCH:
-
-```javascript
-var mrDeployIds = [
-  'customdeploy_mr_script_0',
-  'customdeploy_mr_script_1',
-  'customdeploy_mr_script_2',
-  // ... more deployments
-];
-
-// Try each deployment until one succeeds
-for (var d = 0; d < mrDeployIds.length && taskId === null; d++) {
-  try {
-    var mrTask = task.create({
-      taskType: task.TaskType.MAP_REDUCE,
-      scriptId: mrScriptId,
-      deploymentId: mrDeployIds[d],
-      params: {...}
-    });
-    taskId = mrTask.submit();
-    break; // Success
-  } catch (e) {
-    if (e.name === 'MAP_REDUCE_ALREADY_RUNNING') {
-      continue; // Try next deployment
-    }
-  }
-}
-```
+**Always create multiple MR deployments** and try them all in SCH. If one deployment is busy, try the next one until one succeeds.
 
 ## Button/Link Implementation
 
@@ -129,7 +101,7 @@ To add a button/link on IF record:
 2. **Client Script** - Handles click, calls Suitelet, shows messages
 3. **Suitelet** - Validates, calls library, returns JSON
 
-**Note**: You need User Event to add UI element. Client Script alone cannot add buttons/links to forms.
+**Alternative**: Suitelet can be triggered directly from a link on the record (without UE/CL), but won't show messages in the UI.
 
 ## Examples
 
@@ -137,7 +109,9 @@ To add a button/link on IF record:
 - **SCH**: `_dsh_sch_integrated_shipping_labels.js`
 - **MR**: `_dsh_mr_integrated_shipping_labels.js`
 - **Library**: `_dsh_lib_integrated_shipping_labels.js`
-- **Suitelet**: `_dsh_sl_integrated_shipping_labels.js` (button trigger)
+- **Suitelet**: `_dsh_sl_integrated_shipping_labels.js`
+- **User Event**: `_dsh_ue_if_integrated_labels_button.js`
+- **Client Script**: `_dsh_cs_integrated_labels_button.js`
 
 ### Autopack
 - **SCH**: `autopackScheduled.js`
