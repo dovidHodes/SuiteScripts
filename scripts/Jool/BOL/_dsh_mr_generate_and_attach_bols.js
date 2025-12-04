@@ -165,6 +165,21 @@ define([
           
           if (scacInExclusionList) {
             log.debug('map', 'TranID: ' + tranId + ' - Skipping: SCAC "' + scac + '" in exclusion list');
+            // Set custbody_requested_bol to true to avoid processing this IF again
+            try {
+              record.submitFields({
+                type: 'itemfulfillment',
+                id: ifId,
+                values: { custbody_requested_bol: true },
+                options: {
+                  enableSourcing: false,
+                  ignoreMandatoryFields: true
+                }
+              });
+              log.debug('map', 'TranID: ' + tranId + ' - Set custbody_requested_bol = true to skip future processing');
+            } catch (fieldError) {
+              log.error('map', 'TranID: ' + tranId + ' - Error setting custbody_requested_bol: ' + fieldError.toString());
+            }
             return;
           } else {
             log.debug('map', 'TranID: ' + tranId + ' - SCAC "' + scac + '" not in exclusion list, proceeding');

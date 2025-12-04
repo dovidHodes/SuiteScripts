@@ -8,6 +8,7 @@
  * - custbody_requested_batch_print = false
  * - custbody_sps_batched_print_com = false
  * - custbody_routing_status = 3 (routing received)
+ * - custbody_requested_bol = true (BOL must be requested/generated first)
  * - Entity has custentity_auto_batch_print = true
  * 
  * Sets custbody_requested_batch_print = true only after MR task is successfully submitted (not failed).
@@ -71,6 +72,8 @@ define(['N/search', 'N/log', 'N/record', 'N/task', 'N/runtime', './_dsh_lib_time
                 'AND',
                 ['custbody_routing_status', 'is', '3'],
                 'AND',
+                ['custbody_requested_bol', 'is', 'T'],  // BOL must be requested/generated first
+                'AND',
                 ['entity', 'anyof', entityIds]
             ],
             columns: [
@@ -127,8 +130,9 @@ define(['N/search', 'N/log', 'N/record', 'N/task', 'N/runtime', './_dsh_lib_time
                         
                         log.debug('execute', 'Processing IF: ' + tranId + ' (ID: ' + ifId + '), Entity: ' + entityId);
                         
-                        // Double-check requested_batch_print field by loading the record
+                        // Double-check requested_batch_print and sps_batched_print_com fields by loading the record
                         // This prevents processing IFs that were just set to true by another concurrent execution
+                        // Note: custbody_requested_bol is already filtered in search, so no need to check again
                         var requestedBatchPrint = false;
                         var spsBatchPrintComplete = false;
                         try {
