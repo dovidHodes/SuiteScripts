@@ -9,6 +9,19 @@
  * 2. Creates pallet records for each batch
  * 3. Updates packages with pallet IDs
  * 4. Updates package content records with pallet IDs
+ * 
+ * REQUIRED SCRIPT PARAMETER:
+ * IMPORTANT: Even though parameters are passed at runtime via task.create(),
+ * the parameter FIELD must exist in the deployment for it to be accessible.
+ * 
+ * In the script deployment (customdeploy1), create a script parameter with:
+ * - Field ID: 'json' 
+ * - Type: Free-Form Text
+ * - Default Value: (leave blank - will be set at runtime)
+ * - The full parameter name will be: custscriptjson
+ * 
+ * Without this parameter field in the deployment, runtime parameters passed
+ * via task.create() will not be accessible in the MR script.
  */
 
 define([
@@ -33,12 +46,106 @@ define([
    */
   function getInputData(inputContext) {
     try {
-      // Get assignment data from script parameter to extract IF ID
-      var scriptObj = runtime.getCurrentScript();
-      var jsonParam = scriptObj.getParameter({ name: 'custscript_assign_packages_to_pallets_json' });
+      // When called via task.create(), parameters are accessed through inputContext.executionContext
+      var jsonParam = null;
+      var paramNames = [
+        'custscriptjson',
+        'custscript_assign_packages_to_pallets_json',
+        'custscript_assign_packages_to_pallets_pallet_assignment_json',
+        'custscript_pallet_assignment_json'
+      ];
+      
+      // First try executionContext (for task.create() calls)
+      if (inputContext && inputContext.executionContext) {
+        try {
+          var execContext = inputContext.executionContext;
+          log.debug('getInputData', 'executionContext exists, trying to get parameters');
+          
+          // Try to get all parameters to see what's available
+          try {
+            // Try to get all parameters - this will help us see what's actually passed
+            var allExecParams = {};
+            for (var k = 0; k < paramNames.length; k++) {
+              try {
+                var testParam = execContext.getParameter({ name: paramNames[k] });
+                if (testParam) {
+                  allExecParams[paramNames[k]] = testParam.substring(0, 100) + '...'; // First 100 chars for debugging
+                }
+              } catch (e) {
+                // Parameter doesn't exist
+              }
+            }
+            log.debug('getInputData', 'Available parameters in executionContext: ' + JSON.stringify(allExecParams));
+          } catch (e) {
+            log.debug('getInputData', 'Could not enumerate executionContext parameters: ' + e.toString());
+          }
+          
+          // Now try to get the actual parameter
+          for (var j = 0; j < paramNames.length && !jsonParam; j++) {
+            try {
+              jsonParam = execContext.getParameter({ name: paramNames[j] });
+              if (jsonParam) {
+                log.debug('getInputData', 'Found parameter in executionContext with name: ' + paramNames[j]);
+                log.debug('getInputData', 'Parameter value (first 200 chars): ' + jsonParam.substring(0, 200));
+                break;
+              }
+            } catch (e) {
+              log.debug('getInputData', 'Parameter ' + paramNames[j] + ' not found in executionContext: ' + e.toString());
+            }
+          }
+        } catch (e) {
+          log.error('getInputData', 'Error accessing executionContext: ' + e.toString());
+        }
+      } else {
+        log.debug('getInputData', 'No executionContext available in inputContext');
+      }
+      
+      // Fallback: try runtime.getCurrentScript() (for manual/deployment parameter calls)
+      if (!jsonParam) {
+        try {
+          var scriptObj = runtime.getCurrentScript();
+          var scriptId = scriptObj.id;
+          log.debug('getInputData', 'Script ID: ' + scriptId);
+          
+          for (var i = 0; i < paramNames.length && !jsonParam; i++) {
+            try {
+              jsonParam = scriptObj.getParameter({ name: paramNames[i] });
+              if (jsonParam) {
+                log.debug('getInputData', 'Found parameter with name: ' + paramNames[i]);
+                break;
+              }
+            } catch (e) {
+              log.debug('getInputData', 'Parameter ' + paramNames[i] + ' not found: ' + e.toString());
+            }
+          }
+          
+          // Try to get all parameters for debugging (but need to specify name)
+          if (!jsonParam) {
+            log.debug('getInputData', 'Trying to enumerate all parameters...');
+            // Try common parameter field IDs without the custscript_ prefix
+            var fieldIds = ['json', 'pallet_assignment_json', 'assignment_json'];
+            for (var f = 0; f < fieldIds.length; f++) {
+              try {
+                var testParamName = 'custscript_' + scriptId.replace('customscript_', '') + '_' + fieldIds[f];
+                log.debug('getInputData', 'Trying parameter name: ' + testParamName);
+                var testParam = scriptObj.getParameter({ name: testParamName });
+                if (testParam) {
+                  jsonParam = testParam;
+                  log.debug('getInputData', 'Found parameter with constructed name: ' + testParamName);
+                  break;
+                }
+              } catch (e) {
+                // Continue
+              }
+            }
+          }
+        } catch (e) {
+          log.debug('getInputData', 'Could not get script object: ' + e.toString());
+        }
+      }
       
       if (!jsonParam) {
-        log.error('getInputData', 'No pallet assignment JSON parameter found');
+        log.error('getInputData', 'No pallet assignment JSON parameter found. Tried parameter names: ' + paramNames.join(', '));
         // Return empty search to prevent processing (using non-existent ID)
         return search.create({
           type: 'itemfulfillment',
@@ -89,11 +196,53 @@ define([
   function map(mapContext) {
     try {
       // Read assignment data from script parameter
-      var scriptObj = runtime.getCurrentScript();
-      var jsonParam = scriptObj.getParameter({ name: 'custscript_assign_packages_to_pallets_json' });
+      // When called via task.create(), parameters are accessed through executionContext
+      var jsonParam = null;
+      var paramNames = [
+        'custscriptjson',
+        'custscript_assign_packages_to_pallets_json',
+        'custscript_assign_packages_to_pallets_pallet_assignment_json',
+        'custscript_pallet_assignment_json'
+      ];
+      
+      // Try executionContext first (for task.create() calls)
+      var executionContext = mapContext.executionContext;
+      if (executionContext) {
+        for (var j = 0; j < paramNames.length && !jsonParam; j++) {
+          try {
+            jsonParam = executionContext.getParameter({ name: paramNames[j] });
+            if (jsonParam) {
+              log.debug('map', 'Found parameter in executionContext with name: ' + paramNames[j]);
+              break;
+            }
+          } catch (e) {
+            // Continue trying
+          }
+        }
+      }
+      
+      // Fallback: try runtime.getCurrentScript()
+      if (!jsonParam) {
+        try {
+          var scriptObj = runtime.getCurrentScript();
+          for (var i = 0; i < paramNames.length && !jsonParam; i++) {
+            try {
+              jsonParam = scriptObj.getParameter({ name: paramNames[i] });
+              if (jsonParam) {
+                log.debug('map', 'Found parameter with name: ' + paramNames[i]);
+                break;
+              }
+            } catch (e) {
+              // Continue trying
+            }
+          }
+        } catch (e) {
+          log.debug('map', 'Could not get script object: ' + e.toString());
+        }
+      }
       
       if (!jsonParam) {
-        log.error('map', 'No pallet assignment JSON parameter found');
+        log.error('map', 'No pallet assignment JSON parameter found. Tried: ' + paramNames.join(', '));
         return;
       }
       
@@ -117,6 +266,8 @@ define([
           palletId: assignment.palletId,
           packageIds: assignment.packageIds || [],
           contentIds: assignment.contentIds || [],
+          items: assignment.items || [],  // Array of {itemId, quantity, cartons}
+          totalCartons: assignment.totalCartons || 0,  // Total carton count for this pallet
           batchNumber: batchNumber,
           totalBatches: totalBatches
         };
@@ -180,6 +331,7 @@ define([
       for (var a = 0; a < assignments.length; a++) {
         var assignment = assignments[a];
         var palletId = assignment.palletId;
+        var palletIndex = assignment.palletIndex + 1; // 1-based index
         
         try {
           // Create pallet if not already created
@@ -189,7 +341,7 @@ define([
                 type: PALLET_RECORD_TYPE
               });
               
-              var palletName = 'Pallet ' + (assignment.palletIndex + 1) + ' - IF ' + tranId;
+              var palletName = 'Pallet ' + palletIndex + ' - IF ' + tranId;
               palletRecord.setValue({
                 fieldId: 'name',
                 value: palletName
@@ -213,7 +365,7 @@ define([
               });
               
               palletsCreated++;
-              log.debug('reduce', 'IF ' + tranId + ' - Created pallet ' + palletId);
+              log.debug('reduce', 'IF ' + tranId + ' - Created pallet ' + palletId + ' (index ' + palletIndex + ')');
               
             } catch (createError) {
               var errorMsg = 'IF ' + tranId + ' - Failed to create pallet ' + (assignment.palletIndex + 1) + ': ' + createError.toString();
@@ -223,6 +375,34 @@ define([
             }
           } else {
             log.debug('reduce', 'IF ' + tranId + ' - Using existing pallet ' + palletId);
+          }
+          
+          // Create JSON for pallet with items and total cartons
+          var palletJson = {
+            items: assignment.items || [],
+            totalCartons: assignment.totalCartons || 0
+          };
+          var palletJsonString = JSON.stringify(palletJson);
+          
+          // Update pallet with JSON data in custrecord17
+          try {
+            record.submitFields({
+              type: PALLET_RECORD_TYPE,
+              id: palletId,
+              values: {
+                custrecord17: palletJsonString
+              },
+              options: {
+                enableSourcing: false,
+                ignoreMandatoryFields: true
+              }
+            });
+            log.debug('reduce', 'IF ' + tranId + ' - Updated pallet ' + palletId + ' with JSON data');
+          } catch (jsonError) {
+            var errorMsg = 'IF ' + tranId + ' - Failed to update pallet JSON field ' + palletId + ': ' + jsonError.toString();
+            log.error('reduce', errorMsg);
+            errors.push(errorMsg);
+            // Continue processing - don't fail the whole pallet
           }
           
           // Update packages with pallet ID
@@ -328,14 +508,21 @@ define([
       }
       
       // Process any output from reduce phase
-      var outputIterator = output.iterator();
-      var outputCount = 0;
-      while (outputIterator.hasNext()) {
-        var outputData = outputIterator.next();
-        outputCount++;
+      if (output && typeof output.iterator === 'function') {
+        try {
+          var outputIterator = output.iterator();
+          var outputCount = 0;
+          while (outputIterator.hasNext()) {
+            var outputData = outputIterator.next();
+            outputCount++;
+          }
+          log.audit('summarize', 'Total output records: ' + outputCount);
+        } catch (outputError) {
+          log.debug('summarize', 'Could not iterate output: ' + outputError.toString());
+        }
+      } else {
+        log.debug('summarize', 'No output iterator available');
       }
-      
-      log.audit('summarize', 'Total output records: ' + outputCount);
       
     } catch (e) {
       log.error('summarize', 'Error in summarize function: ' + e.toString());

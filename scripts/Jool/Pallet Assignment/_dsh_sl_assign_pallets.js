@@ -53,7 +53,7 @@ define([
       
     } catch (error) {
       log.error('Suitelet Error', error);
-      context.response.write({
+      response.write({
         output: JSON.stringify({
           success: false,
           error: error.message || error.toString()

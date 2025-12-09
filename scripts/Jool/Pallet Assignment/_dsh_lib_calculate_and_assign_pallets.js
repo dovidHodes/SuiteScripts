@@ -34,7 +34,7 @@ define([
       success: false,
       ifId: ifId,
       palletsCreated: 0,
-      palletAssignments: [], // Array of {palletId, packageIds: [], contentIds: []}
+      palletAssignments: [], // Array of {palletId, packageIds: [], contentIds: [], items: [{itemId, quantity, cartons}], totalCartons: number}
       itemSummary: {}, // Summary by item
       errors: [],
       warnings: []
@@ -172,6 +172,8 @@ define([
       
       // Step 6: Create pallet records
       var palletIds = [];
+      var totalPallets = palletAssignments.length;
+      
       for (var p = 0; p < palletAssignments.length; p++) {
         try {
           var palletRecord = record.create({
@@ -196,6 +198,25 @@ define([
             });
           }
           
+          // Set percentage used
+          var usagePercentage = palletAssignments[p].usage || 0;
+          palletRecord.setValue({
+            fieldId: 'custrecord_percentage',
+            value: usagePercentage
+          });
+          
+          // Set pallet index (1-based)
+          palletRecord.setValue({
+            fieldId: 'custrecord_pallet_index',
+            value: p + 1
+          });
+          
+          // Set total pallet count
+          palletRecord.setValue({
+            fieldId: 'custrecord_total_pallet_count',
+            value: totalPallets
+          });
+          
           var palletId = palletRecord.save({
             enableSourcing: false,
             ignoreMandatoryFields: true
@@ -204,7 +225,7 @@ define([
           palletIds.push(palletId);
           palletAssignments[p].palletId = palletId;
           
-          log.debug('Pallet Created', 'Pallet ' + palletId + ' created');
+          log.debug('Pallet Created', 'Pallet ' + palletId + ' created with index ' + (p + 1) + ' of ' + totalPallets + ', usage: ' + usagePercentage.toFixed(2) + '%');
         } catch (createError) {
           var errorMsg = 'Failed to create pallet ' + (p + 1) + ': ' + createError.toString();
           log.error('Create Pallet Error', errorMsg);
@@ -274,141 +295,122 @@ define([
    * Items can share pallets, minimize total pallets
    */
   function calculateOptimalPallets(packages, itemUPP, result) {
-    // Group packages by item
+    // Step 1: Group packages and pre-calculate max cartons per pallet (CPP)
     var packagesByItem = {};
-    packages.forEach(function (pkg) {
-      if (!packagesByItem[pkg.itemId]) {
-        packagesByItem[pkg.itemId] = [];
-      }
+    var maxCppByItem = {};        // SKU → max cartons per pallet
+    var percentPerCarton = {};    // SKU → % of pallet one carton uses
+  
+    packages.forEach(function(pkg) {
+      if (!packagesByItem[pkg.itemId]) packagesByItem[pkg.itemId] = [];
       packagesByItem[pkg.itemId].push(pkg);
+  
+      if (!maxCppByItem[pkg.itemId]) {
+        var upp = itemUPP[pkg.itemId] || 0;
+        var cartonQty = pkg.packageQty;
+        var maxCpp = upp > 0 ? Math.floor(upp / cartonQty) : 1;
+        maxCpp = Math.max(maxCpp, 1);
+  
+        maxCppByItem[pkg.itemId] = maxCpp;
+        percentPerCarton[pkg.itemId] = 100.0 / maxCpp;  // Key!
+      }
     });
-    
-    // Calculate how many cartons fit per pallet for each item
-    var cartonsPerPallet = {}; // {itemId: cartonsPerPallet}
-    for (var itemId in packagesByItem) {
-      var upp = itemUPP[itemId];
-      if (!upp || upp <= 0) {
-        var errorMsg = 'Item ' + itemId + ' has invalid or missing UPP (units per pallet): ' + upp;
-        log.error('Invalid UPP', errorMsg);
-        result.errors.push(errorMsg);
-        continue;
-      }
-      
-      // Get carton qty (assume all packages for this item have same qty)
-      var firstPkg = packagesByItem[itemId][0];
-      var cartonQty = firstPkg.packageQty;
-      
-      if (cartonQty <= 0) {
-        var errorMsg = 'Item ' + itemId + ' has invalid carton quantity: ' + cartonQty;
-        log.error('Invalid Carton Qty', errorMsg);
-        result.errors.push(errorMsg);
-        continue;
-      }
-      
-      // Calculate cartons per pallet (UPP must be divisible by carton qty)
-      var cartonsPerPalletForItem = Math.floor(upp / cartonQty);
-      
-      if (cartonsPerPalletForItem <= 0) {
-        var errorMsg = 'Item ' + itemId + ': UPP=' + upp + ', CartonQty=' + cartonQty + ', CartonsPerPallet=' + cartonsPerPalletForItem + ' (must be at least 1)';
-        log.error('Cartons Per Pallet', errorMsg);
-        result.errors.push(errorMsg);
-        cartonsPerPalletForItem = 1; // At least 1 carton per pallet
-      }
-      
-      cartonsPerPallet[itemId] = cartonsPerPalletForItem;
-    }
-    
-    // Now assign packages to pallets optimally
-    var pallets = []; // Array of {palletId: null, packages: [], items: {}}
-    var packageIterator = 0; // Global iterator for all packages
-    
-    // Find maximum cartons per pallet across all items (used as total pallet capacity)
-    var maxTotalCartonsPerPallet = 0;
-    for (var itemId in cartonsPerPallet) {
-      if (cartonsPerPallet[itemId] > maxTotalCartonsPerPallet) {
-        maxTotalCartonsPerPallet = cartonsPerPallet[itemId];
-      }
-    }
-    log.debug('Max Total Cartons Per Pallet', 'Maximum cartons per pallet (total capacity): ' + maxTotalCartonsPerPallet);
-    
-    // Sort items by cartons per pallet (largest first) for better optimization
-    // This is "First-Fit Decreasing" - processes larger items first
+  
+    // Step 2: Sort items by "difficulty" (total % needed) — hardest first
     var sortedItemIds = Object.keys(packagesByItem).sort(function(a, b) {
-      var cppA = cartonsPerPallet[a] || 0;
-      var cppB = cartonsPerPallet[b] || 0;
-      return cppB - cppA; // Descending order (largest first)
+      var totalPercentA = packagesByItem[a].length * percentPerCarton[a];
+      var totalPercentB = packagesByItem[b].length * percentPerCarton[b];
+      return totalPercentB - totalPercentA;  // descending
     });
-    
-    log.debug('Item Processing Order', 'Processing items in order (by CPP): ' + sortedItemIds.join(', '));
-    
-    // Process each item's packages (now in sorted order)
-    for (var idx = 0; idx < sortedItemIds.length; idx++) {
-      var itemId = sortedItemIds[idx];
+  
+    // Step 3: Pallets array
+    var pallets = [];  // each: { packages: [], usage: 0.0, itemCounts: {} }
+  
+    // Step 4: Place each carton using First-Fit with % capacity
+    sortedItemIds.forEach(function(itemId) {
       var itemPackages = packagesByItem[itemId];
-      var maxCartonsPerPallet = cartonsPerPallet[itemId] || 1;
-      
-      // Try to fit packages into existing pallets first
-      for (var p = 0; p < itemPackages.length; p++) {
-        var pkg = itemPackages[p];
-        packageIterator++;
-        var assigned = false;
-        
-        // Try existing pallets
-        for (var palIdx = 0; palIdx < pallets.length; palIdx++) {
-          var pallet = pallets[palIdx];
-          
-          // Count total cartons on this pallet
-          var totalCartonsOnPallet = pallet.packages.length;
-          
-          // Count cartons for this item already on this pallet
-          var itemCartonCount = pallet.items[itemId] || 0;
-          
-          // Check if we can add another carton of this item AND total cartons won't exceed max
-          // Check totalCartonsOnPallet + 1 to ensure adding one more won't exceed limit
-          if (itemCartonCount < maxCartonsPerPallet && (totalCartonsOnPallet + 1) <= maxTotalCartonsPerPallet) {
-            var packagesBefore = pallet.packages.length;
+      var percentPer = percentPerCarton[itemId];
+      var maxCpp = maxCppByItem[itemId];
+  
+      itemPackages.forEach(function(pkg) {
+        var placed = false;
+  
+        // Try to place on existing pallets (First-Fit)
+        for (var i = 0; i < pallets.length; i++) {
+          var pallet = pallets[i];
+          var currentCount = (pallet.itemCounts[itemId] || 0);
+  
+          // Check both: per-item limit AND total % capacity
+          if (currentCount < maxCpp && 
+              (pallet.usage + percentPer) <= 100.0) {   // This is the magic line
+  
             pallet.packages.push(pkg);
-            pallet.items[itemId] = (pallet.items[itemId] || 0) + 1;
-            log.debug('Assign Package to Pallet', 
-              'Package: ' + packageIterator + ' Item: ' + itemId + ' + ' + maxCartonsPerPallet);
-            log.debug('Assign Package to Pallet', 
-              'Assigned to Pallet: ' + (palIdx + 1) + 
-              ', Packages on pallet before: ' + packagesBefore + 
-              ', Packages on pallet now: ' + pallet.packages.length);
-            assigned = true;
+            pallet.itemCounts[itemId] = currentCount + 1;
+            pallet.usage += percentPer;
+            placed = true;
             break;
           }
         }
-        
-        // If couldn't fit in existing pallet, create new one
-        if (!assigned) {
-          var newPallet = {
-            palletId: null, // Will be set when created
+  
+        // No existing pallet has space → create new
+        if (!placed) {
+          pallets.push({
             packages: [pkg],
-            items: {}
-          };
-          newPallet.items[itemId] = 1;
-          pallets.push(newPallet);
-          log.debug('Create New Pallet', 
-            'Package: ' + packageIterator + ' Item: ' + itemId + ' + ' + maxCartonsPerPallet);
-          log.debug('Create New Pallet', 
-            'New Pallet: ' + pallets.length + ', Packages on pallet: 1');
+            itemCounts: { [itemId]: 1 },
+            usage: percentPer
+          });
         }
-      }
-    }
-    
-    // Convert to final format
-    var assignments = [];
-    for (var a = 0; a < pallets.length; a++) {
-      var pal = pallets[a];
-      assignments.push({
-        palletId: null, // Will be set when created
-        packageIds: pal.packages.map(function (p) { return p.packageId; }),
-        contentIds: pal.packages.map(function (p) { return p.contentId; })
       });
+    });
+  
+    // Log pallet usage after assignment
+    for (var i = 0; i < pallets.length; i++) {
+      var pal = pallets[i];
+      log.audit('Pallet ' + (i + 1), 
+        'Usage: ' + pal.usage.toFixed(2) + '% | Packages: ' + pal.packages.length);
     }
     
-    return assignments;
+    // Log pallet usage after assignment
+    for (var i = 0; i < pallets.length; i++) {
+      var pal = pallets[i];
+      log.audit('Pallet ' + (i + 1), 
+        'Usage: ' + pal.usage.toFixed(2) + '% | Packages: ' + pal.packages.length);
+    }
+    
+    // Convert to your format (preserve usage for later logging)
+    return pallets.map(function(pal, idx) {
+      // Calculate item summary for this pallet
+      var itemsOnPallet = {};
+      var totalCartons = pal.packages.length;
+      
+      // Group packages by item and calculate quantities
+      pal.packages.forEach(function(pkg) {
+        var itemId = pkg.itemId;
+        if (!itemsOnPallet[itemId]) {
+          itemsOnPallet[itemId] = {
+            itemId: itemId,
+            quantity: 0,
+            cartons: 0
+          };
+        }
+        itemsOnPallet[itemId].quantity += pkg.packageQty;
+        itemsOnPallet[itemId].cartons += 1;
+      });
+      
+      // Convert to array
+      var itemsArray = [];
+      for (var itemId in itemsOnPallet) {
+        itemsArray.push(itemsOnPallet[itemId]);
+      }
+      
+      return {
+        palletId: null,
+        packageIds: pal.packages.map(function(p) { return p.packageId; }),
+        contentIds: pal.packages.map(function(p) { return p.contentId; }),
+        usage: pal.usage,  // Preserve usage percentage
+        items: itemsArray,  // Array of {itemId, quantity, cartons}
+        totalCartons: totalCartons  // Total carton count for this pallet
+      };
+    });
   }
   
   /**
@@ -466,7 +468,9 @@ define([
       var assignment = palletAssignments[i];
       var palletId = assignment.palletId || 'PENDING';
       
-      log.audit('--- Pallet ' + (i + 1) + ' (ID: ' + palletId + ') ---', '');
+      var usage = assignment.usage !== undefined ? assignment.usage.toFixed(2) + '%' : 'N/A';
+      log.audit('--- Pallet ' + (i + 1) + ' (ID: ' + palletId + ') ---', 
+        'Usage: ' + usage + ' | Packages: ' + assignment.packageIds.length);
       
       // Group by item
       var itemsOnPallet = {};
@@ -553,7 +557,7 @@ define([
           scriptId: mrScriptId,
           deploymentId: mrDeployId,
           params: {
-            custscript_assign_packages_to_pallets_json: jsonParam
+            custscriptjson: jsonParam
           }
         });
         

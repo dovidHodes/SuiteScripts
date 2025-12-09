@@ -1,0 +1,266 @@
+<?xml version="1.0"?>
+<!DOCTYPE pdf PUBLIC "-//big.faceless.org//report" "report-1.1.dtd">
+<pdf>
+    <#-- Template uses pallet record structure - set Record Type to customrecord_asn_pallet in NetSuite -->
+    <#-- Data is passed via custom data source with alias 'record' -->
+    <#if record?has_content>
+
+            <head>
+                <link name="NotoSans" type="font" subtype="truetype" src="${nsfont.NotoSans_Regular}" src-bold="${nsfont.NotoSans_Bold}" src-italic="${nsfont.NotoSans_Italic}" src-bolditalic="${nsfont.NotoSans_BoldItalic}" bytes="2" />
+                <#if .locale=="zh_CN">
+                    <link name="NotoSansCJKsc" type="font" subtype="opentype" src="${nsfont.NotoSansCJKsc_Regular}" src-bold="${nsfont.NotoSansCJKsc_Bold}" bytes="2" />
+                    <#elseif .locale=="zh_TW">
+                        <link name="NotoSansCJKtc" type="font" subtype="opentype" src="${nsfont.NotoSansCJKtc_Regular}" src-bold="${nsfont.NotoSansCJKtc_Bold}" bytes="2" />
+                        <#elseif .locale=="ja_JP">
+                            <link name="NotoSansCJKjp" type="font" subtype="opentype" src="${nsfont.NotoSansCJKjp_Regular}" src-bold="${nsfont.NotoSansCJKjp_Bold}" bytes="2" />
+                            <#elseif .locale=="ko_KR">
+                                <link name="NotoSansCJKkr" type="font" subtype="opentype" src="${nsfont.NotoSansCJKkr_Regular}" src-bold="${nsfont.NotoSansCJKkr_Bold}" bytes="2" />
+                                <#elseif .locale=="th_TH">
+                                    <link name="NotoSansThai" type="font" subtype="opentype" src="${nsfont.NotoSansThai_Regular}" src-bold="${nsfont.NotoSansThai_Bold}" bytes="2" />
+                </#if>
+
+                <style type="text/css">
+                    body {
+                        font-family: sans-serif;
+                        font-size: 10pt;
+                    }
+                    
+                    .label-container {
+                        border: 4px solid #000000;
+                        padding: 8px;
+                        margin: 0;
+                    }
+                    
+                    .two-column {
+                        width: 100%;
+                        border-collapse: collapse;
+                    }
+                    
+                    .two-column td {
+                        width: 50%;
+                        vertical-align: top;
+                        padding: 6px;
+                        border: 1px solid #000000;
+                    }
+                    
+                    .two-column tr:first-child td {
+                        border-top: 0;
+                    }
+                    
+                    .two-column tr td:first-child {
+                        border-left: 0;
+                    }
+                    
+                    .two-column tr td:last-child {
+                        border-right: 0;
+                    }
+                    
+                    .two-column tr:last-child td {
+                        border-bottom: 0;
+                    }
+                    
+                    .section-header {
+                        font-weight: bold;
+                        font-size: 10pt;
+                        background-color: #000000;
+                        color: #ffffff;
+                        padding: 5px;
+                        text-align: left;
+                    }
+                    
+                    .address-text {
+                        font-size: 10pt;
+                        line-height: 1.3;
+                        padding: 5px;
+                    }
+                    
+                    .carrier-info {
+                        font-size: 9pt;
+                        padding: 5px;
+                    }
+                    
+                    .carrier-label {
+                        font-weight: bold;
+                    }
+                    
+                    .po-barcode-area {
+                        text-align: center;
+                        padding: 10px;
+                        vertical-align: middle;
+                    }
+                    
+                    .po-barcode-text {
+                        font-size: 12pt;
+                        font-weight: bold;
+                        margin-top: 5px;
+                    }
+                    
+                    .pallet-info {
+                        font-size: 10pt;
+                        padding: 5px;
+                    }
+                    
+                    .asin-section {
+                        text-align: center;
+                        padding: 15px 0;
+                        border-top: 1px solid #000000;
+                        border-bottom: 1px solid #000000;
+                    }
+                    
+                    .asin-text {
+                        font-size: 20pt;
+                        font-weight: bold;
+                        margin: 10px 0;
+                        letter-spacing: 1px;
+                    }
+                    
+                    .expiration-date {
+                        font-size: 10pt;
+                        margin-top: 5px;
+                    }
+                    
+                    .sscc-section {
+                        text-align: center;
+                        padding: 15px 0;
+                        border-top: 1px solid #000000;
+                    }
+                    
+                    .sscc-label {
+                        font-size: 10pt;
+                        font-weight: bold;
+                        margin-bottom: 10px;
+                    }
+                    
+                    .sscc-barcode-area {
+                        margin: 10px 0;
+                    }
+                    
+                    .sscc-barcode-area div {
+                        width: 100%;
+                        max-width: 600px;
+                        margin: 0 auto;
+                    }
+                    
+                    .sscc-text {
+                        font-size: 10pt;
+                        margin-top: 5px;
+                        font-family: monospace;
+                    }
+                </style>
+            </head>
+
+            <body header="nlheader" header-height="0pt" footer="nlfooter" footer-height="0pt" padding="0.15in" size="Letter" orientation="landscape">
+                
+                <div class="label-container">
+                    
+                    <!-- Top Section: SHIP FROM and SHIP TO -->
+                    <table class="two-column" style="margin-bottom: 0;">
+                        <tr>
+                            <td>
+                                <div class="section-header">SHIP FROM:</div>
+                                <div class="address-text">
+                                    <#-- Location data is passed in the custom data source structure -->
+                                    <#if record.custrecord_parent_if.custbody_ship_from_location?has_content>
+                                        <#if record.custrecord_parent_if.custbody_ship_from_location.name?has_content>
+                                            ${record.custrecord_parent_if.custbody_ship_from_location.name}<br/>
+                                        </#if>
+                                        <#if record.custrecord_parent_if.custbody_ship_from_location.mainaddress_text?has_content>
+                                            ${record.custrecord_parent_if.custbody_ship_from_location.mainaddress_text}
+                                        </#if>
+                                    </#if>
+                                </div>
+                            </td>
+                            <td>
+                                <div class="section-header">SHIP TO:</div>
+                                <div class="address-text">
+                                    <#if record.custrecord_parent_if.shipcompany?has_content>${record.custrecord_parent_if.shipcompany}<br/></#if>
+                                    <#if record.custrecord_parent_if.shipaddr1?has_content>${record.custrecord_parent_if.shipaddr1}<br/></#if>
+                                    <#if record.custrecord_parent_if.shipcity?has_content>${record.custrecord_parent_if.shipcity}<#if record.custrecord_parent_if.shipstate?has_content>, ${record.custrecord_parent_if.shipstate}</#if><br/></#if>
+                                    <#if record.custrecord_parent_if.shipzip?has_content>${record.custrecord_parent_if.shipzip}</#if>
+                                </div>
+                            </td>
+                        </tr>
+                    </table>
+                    
+                    <!-- Second Section: CARRIER (Optional) and PO(s) -->
+                    <table class="two-column" style="margin-top: 0; border-top: 0;">
+                        <tr>
+                            <td>
+                                <#if record.custrecord_parent_if.custbody_sps_billofladingnumber?has_content || record.custrecord_parent_if.custbody_sps_carrierpronumber?has_content || record.custrecord_parent_if.custbody_amazon_arn?has_content>
+                                <div class="section-header">CARRIER:</div>
+                                <div class="carrier-info">
+                                    <#if record.custrecord_parent_if.custbody_sps_billofladingnumber?has_content>
+                                        <span class="carrier-label">BOL #:</span> ${record.custrecord_parent_if.custbody_sps_billofladingnumber}<br/>
+                                    </#if>
+                                    <#if record.custrecord_parent_if.custbody_sps_carrierpronumber?has_content>
+                                        <span class="carrier-label">PRO #:</span> ${record.custrecord_parent_if.custbody_sps_carrierpronumber}<br/>
+                                    </#if>
+                                    <#if record.custrecord_parent_if.custbody_amazon_arn?has_content>
+                                        <span class="carrier-label">ARN:</span> ${record.custrecord_parent_if.custbody_amazon_arn}
+                                    </#if>
+                                </div>
+                                <#else>
+                                <div style="padding: 5px;">&nbsp;</div>
+                                </#if>
+                            </td>
+                            <td>
+                                <div class="section-header">PO(s):</div>
+                                <div class="po-barcode-area">
+                                    <#-- Vertical barcode for PO - placeholder for barcode generation -->
+                                    <div style="border: 1px solid #cccccc; padding: 15px 5px; margin: 5px auto; width: 60px; min-height: 100px; display: flex; align-items: center; justify-content: center; writing-mode: vertical-rl; text-orientation: mixed;">
+                                        <span style="font-size: 8pt; color: #999999;">BARCODE</span>
+                                    </div>
+                                    <#if record.custrecord_parent_if.custbody_sps_ponum_from_salesorder?has_content>
+                                        <div class="po-barcode-text">${record.custrecord_parent_if.custbody_sps_ponum_from_salesorder}</div>
+                                    </#if>
+                                </div>
+                            </td>
+                        </tr>
+                    </table>
+                    
+                    <!-- Third Section: Pallet Count (Optional) -->
+                    <table class="two-column" style="margin-top: 0; border-top: 0;">
+                        <tr>
+                            <td>
+                                <#if record.custrecord_total_pallet_count?has_content && record.custrecord_total_pallet_count > 1>
+                                <div class="pallet-info">
+                                    <strong>Pallet ${record.custrecord_pallet_index!1} of ${record.custrecord_total_pallet_count}</strong>
+                                </div>
+                                <#else>
+                                <div style="padding: 5px;">&nbsp;</div>
+                                </#if>
+                            </td>
+                            <td>
+                                <div style="padding: 5px;">&nbsp;</div>
+                            </td>
+                        </tr>
+                    </table>
+                    
+                    <!-- Fourth Section: SINGLE ASIN -->
+                    <div class="asin-section">
+                        <#if record.custrecord_items?has_content>
+                            <#-- Parse ASIN from items field if it's stored there, or get from first package/item -->
+                            <div class="asin-text">SINGLE ASIN - ${record.custrecord_items}</div>
+                        <#else>
+                            <div class="asin-text">SINGLE ASIN</div>
+                        </#if>
+                    </div>
+                    
+                    <!-- Bottom Section: Pallet SSCC Barcode -->
+                    <div class="sscc-section">
+                        <div class="sscc-label">Pallet SSCC</div>
+                        <div class="sscc-barcode-area">
+                            <#-- Large horizontal barcode for SSCC - placeholder for barcode generation -->
+                            <div style="border: 1px solid #cccccc; padding: 25px 40px; margin: 10px auto; min-height: 80px; display: flex; align-items: center; justify-content: center; width: 90%;">
+                                <span style="font-size: 8pt; color: #999999;">SSCC BARCODE</span>
+                            </div>
+                            <#-- SSCC can be generated from pallet ID -->
+                            <div class="sscc-text">(00) ${record.id}</div>
+                        </div>
+                    </div>
+                    
+                </div>
+                
+            </body>
+    </#if>
+</pdf>

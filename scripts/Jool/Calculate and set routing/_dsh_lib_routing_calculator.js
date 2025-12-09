@@ -8,8 +8,10 @@
 
 define([
   'N/record',
-  'N/log'
-], function (record, log) {
+  'N/log',
+  'N/email',
+  'N/url'
+], function (record, log, email, url) {
   
   /**
    * Calculates and applies all routing fields to an Item Fulfillment
@@ -101,6 +103,7 @@ define([
       // Store item data for pallet calculation
       var itemData = [];
       var hasMissingUPP = false; // Track if any items have missing units per pallet
+      var missingUPPItems = []; // Track which items have missing UPP for email notification
       
       log.debug('Routing Calculator - Pallet Debug', '=== STARTING PALLET CALCULATION ===');
       log.debug('Routing Calculator - Pallet Debug', 'Total lines in IF: ' + lineCount + ' (processing all lines with quantity > 0)');
@@ -160,9 +163,17 @@ define([
           // Check if UPP is missing/null/empty (defaulted to 1)
           if (!uppFieldValue || uppFieldValue === 0 || uppFieldValue === '') {
             hasMissingUPP = true;
+            var locationName = locationRecord.getValue('name') || locationId;
+            missingUPPItems.push({
+              itemName: itemName,
+              itemId: itemId,
+              locationId: locationId,
+              locationName: locationName,
+              quantity: itemQuantity
+            });
             log.audit('Routing Calculator - Missing UPP', 
                         'Item ' + itemName + ' (ID: ' + itemId + ') has missing/null/empty units per pallet field. ' +
-                        'Location: ' + locationId + ', Defaulting to 1 unit per pallet. ' +
+                        'Location: ' + locationId + ' (' + locationName + '), Defaulting to 1 unit per pallet. ' +
                         'Routing status will NOT be set to 1.');
           }
           
@@ -314,50 +325,68 @@ define([
         value: totalPallets
       });
       
-      // Calculate and set pickup date from SO MABD (1 business day before MABD)
+      // Calculate and set pickup date from IF MABD (2 business days before MABD)
       var pickupDateSet = false;
+      var pickupDateError = false; // Track if pickup date couldn't be set
       try {
-        var soId = ifRecord.getValue('createdfrom');
-        if (soId) {
-          var soRecord = record.load({
-            type: 'salesorder',
-            id: soId,
-            isDynamic: false
-          });
+        // Get MABD directly from Item Fulfillment
+        var mabdDate = ifRecord.getValue('custbody_gbs_mabd');
+        log.debug('Routing Calculator', 'MABD date from IF: ' + (mabdDate ? formatDateForLog(new Date(mabdDate)) : 'null/empty'));
+        if (mabdDate) {
+          var pickupDateResult = calculatePickupDateFromMABD(mabdDate);
           
-          var mabdDate = soRecord.getValue('custbody_gbs_mabd');
-          if (mabdDate) {
-            var requestedPickupDate = calculatePickupDateFromMABD(mabdDate);
-            
-            if (requestedPickupDate) {
-              ifRecord.setValue({
-                fieldId: 'custbody_sps_date_118',
-                value: requestedPickupDate
-              });
-              pickupDateSet = true;
-              log.debug('Routing Calculator', 'Set pickup date to ' + formatDateForLog(requestedPickupDate));
-            }
+          log.debug('Routing Calculator', 'Pickup date calculation result - Date: ' + (pickupDateResult.date ? formatDateForLog(pickupDateResult.date) : 'null') + ', Reason: ' + (pickupDateResult.reason || 'none'));
+          
+          if (pickupDateResult.date) {
+            ifRecord.setValue({
+              fieldId: 'custbody_sps_date_118',
+              value: pickupDateResult.date
+            });
+            pickupDateSet = true;
+            log.debug('Routing Calculator', 'Set pickup date to ' + formatDateForLog(pickupDateResult.date));
+          } else {
+            // Send email notification when pickup date cannot be set
+            pickupDateError = true;
+            log.debug('Routing Calculator', 'Pickup date could not be set. Reason: ' + pickupDateResult.reason + '. Sending email notification...');
+            sendPickupDateErrorEmail(ifTranId, ifId, pickupDateResult.reason, mabdDate);
           }
+        } else {
+          // Send email notification when MABD is missing
+          pickupDateError = true;
+          log.debug('Routing Calculator', 'MABD date is missing on Item Fulfillment. Sending email notification...');
+          sendPickupDateErrorEmail(ifTranId, ifId, 'MABD date is missing on the Item Fulfillment', null);
         }
       } catch (dateError) {
+        pickupDateError = true;
         log.error('Routing Calculator', 'Error setting pickup date: ' + dateError.toString());
+        // Send email notification for unexpected errors
+        sendPickupDateErrorEmail(ifTranId, ifId, 'Error setting pickup date: ' + dateError.toString(), null);
       }
       
-      // Set routing status to 1 ONLY if pickup date was set AND no items have missing UPP
+      // Set routing status based on conditions
       if (pickupDateSet && !hasMissingUPP) {
+        // Set routing status to 1 if pickup date was set AND no items have missing UPP
         ifRecord.setValue({
           fieldId: 'custbody_routing_status',
           value: 1
         });
         log.debug('Routing Calculator', 'Set routing status to 1 (ready for routing request)');
-      } else {
-        if (hasMissingUPP) {
-          log.audit('Routing Calculator', 
-                      'NOT setting routing status to 1 because one or more items have missing/null/empty units per pallet field. ' +
-                      'Please update item UPP fields and recalculate routing.');
-        } else if (!pickupDateSet) {
-          log.debug('Routing Calculator', 'NOT setting routing status to 1 because pickup date was not set');
-        }
+      } else if (pickupDateError) {
+        // Set routing status to 4 when pickup date cannot be set
+        ifRecord.setValue({
+          fieldId: 'custbody_routing_status',
+          value: 4
+        });
+        log.debug('Routing Calculator', 'Set routing status to 4 (pickup date could not be set)');
+      } else if (hasMissingUPP) {
+        // Send email notification when UPP is missing
+        log.debug('Routing Calculator', 'Missing UPP detected. Sending email notification...');
+        sendMissingUPPErrorEmail(ifTranId, ifId, missingUPPItems, locationName);
+        log.audit('Routing Calculator', 
+                    'NOT setting routing status to 1 because one or more items have missing/null/empty units per pallet field. ' +
+                    'Please update item UPP fields and recalculate routing.');
+      } else if (!pickupDateSet) {
+        log.debug('Routing Calculator', 'NOT setting routing status to 1 because pickup date was not set');
       }
       
       // Save the record
@@ -375,44 +404,116 @@ define([
   
   /**
    * Calculates the requested pickup date from SO MABD date
-   * Calculates 1 business day before MABD (excluding Saturday and Sunday)
-   * If the calculated date is within 1 business day from today, returns null
+   * Calculates 2 business days before MABD (excluding Saturday and Sunday)
+   * Requires minimum 2 business days in the future from today
+   * Requires minimum 2 business days before MABD
+   * If the calculated date falls on a weekend, moves it forward to the next business day
+   * Only leaves blank if date is forced to be within 2 business days from today or less than 2 business days before MABD
    * @param {Date|string} mabdDate - The MABD date from the SO
-   * @returns {Date|null} - Date object, or null if should be left blank
+   * @returns {Object} - Object with {date: Date|null, reason: string|null} - reason is null if date is set, contains error message if not
    */
   function calculatePickupDateFromMABD(mabdDate) {
     try {
       if (!mabdDate) {
-        return null;
+        return {date: null, reason: 'MABD date is missing or invalid'};
       }
       
-      // Calculate 1 business day before MABD
-      var pickupDateObj = calculateBusinessDaysBefore(mabdDate, 1);
+      // Calculate 2 business days before MABD (changed from 1 to meet requirement of at least 2 business days before MABD)
+      var pickupDateObj = calculateBusinessDaysBefore(mabdDate, 2);
       
       if (!pickupDateObj) {
-        return null;
+        return {date: null, reason: 'Unable to calculate 2 business days before MABD'};
       }
       
       // Set time to midnight for comparison
       pickupDateObj.setHours(0, 0, 0, 0);
       
-      // Get current date
+      // Get current date and MABD date for comparison
       var today = new Date();
       today.setHours(0, 0, 0, 0);
       
-      // Check if pickup date is within 1 business day from today
-      var businessDaysBetween = countBusinessDaysBetween(today, pickupDateObj);
+      var mabdDateObj = new Date(mabdDate);
+      mabdDateObj.setHours(0, 0, 0, 0);
       
-      if (businessDaysBetween <= 1) {
-        log.debug('Routing Calculator', 'Pickup date is within 1 business day, leaving field blank');
-        return null;
+      log.debug('Routing Calculator - Pickup Date Debug', '=== PICKUP DATE CALCULATION DEBUG ===');
+      log.debug('Routing Calculator - Pickup Date Debug', 'MABD Date: ' + formatDateForLog(mabdDateObj));
+      log.debug('Routing Calculator - Pickup Date Debug', 'Initial calculated pickup date (2 business days before MABD): ' + formatDateForLog(pickupDateObj));
+      log.debug('Routing Calculator - Pickup Date Debug', 'Today: ' + formatDateForLog(today));
+      
+      // If pickup date falls on a weekend, move it forward to the next business day
+      var dayOfWeek = pickupDateObj.getDay();
+      if (dayOfWeek === 0 || dayOfWeek === 6) {
+        log.debug('Routing Calculator - Pickup Date Debug', 'Pickup date falls on weekend (' + (dayOfWeek === 0 ? 'Sunday' : 'Saturday') + '), moving forward to next business day');
+        pickupDateObj = moveToNextBusinessDay(pickupDateObj);
+        log.debug('Routing Calculator - Pickup Date Debug', 'Adjusted pickup date after weekend move: ' + formatDateForLog(pickupDateObj));
       }
       
-      return pickupDateObj;
+      // CRITICAL: Check if pickup date is BEFORE today (in the past)
+      if (pickupDateObj < today) {
+        var reason = 'Pickup date is in the past. Calculated date: ' + formatDateForLog(pickupDateObj) + ', Today: ' + formatDateForLog(today) + '. This occurs when MABD is in the past or too close to today.';
+        log.debug('Routing Calculator - Pickup Date Debug', 'REJECTED: ' + reason);
+        return {date: null, reason: reason};
+      }
+      
+      // Check if pickup date is at least 2 business days from today
+      // Note: countBusinessDaysBetween is inclusive, so if today is Monday and pickup is Tuesday, count = 2
+      // We need at least 2 business days in the future, so count must be > 2 (meaning at least Wednesday)
+      var businessDaysFromToday = countBusinessDaysBetween(today, pickupDateObj);
+      log.debug('Routing Calculator - Pickup Date Debug', 'Business days from today: ' + businessDaysFromToday + ' (needs to be > 2 for at least 2 business days in the future)');
+      if (businessDaysFromToday <= 2) {
+        var reason = 'Pickup date is not at least 2 business days from today. Calculated date: ' + formatDateForLog(pickupDateObj) + ', Today: ' + formatDateForLog(today);
+        log.debug('Routing Calculator - Pickup Date Debug', 'REJECTED: ' + reason);
+        return {date: null, reason: reason};
+      }
+      
+      // Check if pickup date is at least 2 business days before MABD
+      var businessDaysBeforeMABD = countBusinessDaysBetween(pickupDateObj, mabdDateObj);
+      log.debug('Routing Calculator - Pickup Date Debug', 'Business days before MABD: ' + businessDaysBeforeMABD + ' (needs to be > 1)');
+      if (businessDaysBeforeMABD <= 1) {
+        var reason = 'Pickup date is not at least 2 business days before MABD. Calculated date: ' + formatDateForLog(pickupDateObj) + ', MABD: ' + formatDateForLog(mabdDateObj);
+        log.debug('Routing Calculator - Pickup Date Debug', 'REJECTED: ' + reason);
+        return {date: null, reason: reason};
+      }
+      
+      log.debug('Routing Calculator - Pickup Date Debug', 'ACCEPTED: Pickup date is valid - ' + formatDateForLog(pickupDateObj));
+      log.debug('Routing Calculator - Pickup Date Debug', '=== END PICKUP DATE CALCULATION DEBUG ===');
+      
+      return {date: pickupDateObj, reason: null};
       
     } catch (e) {
-      log.error('Routing Calculator', 'Error calculating pickup date: ' + e.toString());
-      return null;
+      var errorMsg = 'Error calculating pickup date: ' + e.toString();
+      log.error('Routing Calculator', errorMsg);
+      return {date: null, reason: errorMsg};
+    }
+  }
+  
+  /**
+   * Moves a date forward to the next business day (Monday-Friday)
+   * If the date is already a business day, returns it unchanged
+   * @param {Date} dateObj - The date to move forward
+   * @returns {Date} - The next business day date
+   */
+  function moveToNextBusinessDay(dateObj) {
+    try {
+      var resultDate = new Date(dateObj);
+      var dayOfWeek = resultDate.getDay();
+      
+      // If it's Saturday (6), move to Monday (add 2 days)
+      if (dayOfWeek === 6) {
+        resultDate.setDate(resultDate.getDate() + 2);
+      }
+      // If it's Sunday (0), move to Monday (add 1 day)
+      else if (dayOfWeek === 0) {
+        resultDate.setDate(resultDate.getDate() + 1);
+      }
+      // Otherwise it's already a business day, return as-is
+      
+      resultDate.setHours(0, 0, 0, 0);
+      return resultDate;
+      
+    } catch (e) {
+      log.error('Routing Calculator', 'Error moving to next business day: ' + e.toString());
+      return dateObj;
     }
   }
   
@@ -504,6 +605,149 @@ define([
     } catch (e) {
       log.error('Routing Calculator', 'Error calculating business days: ' + e.toString());
       return null;
+    }
+  }
+  
+  /**
+   * Sends an email notification when pickup date cannot be set
+   * @param {string} ifTranId - Item Fulfillment transaction ID
+   * @param {string|number} ifId - Item Fulfillment internal ID
+   * @param {string} reason - Reason why pickup date could not be set
+   * @param {Date|string|null} mabdDate - MABD date if available
+   */
+  function sendPickupDateErrorEmail(ifTranId, ifId, reason, mabdDate) {
+    try {
+      log.debug('Routing Calculator - Email', '=== SENDING PICKUP DATE ERROR EMAIL ===');
+      log.debug('Routing Calculator - Email', 'IF TranID: ' + ifTranId);
+      log.debug('Routing Calculator - Email', 'IF ID: ' + ifId);
+      log.debug('Routing Calculator - Email', 'Reason: ' + reason);
+      log.debug('Routing Calculator - Email', 'MABD Date: ' + (mabdDate ? formatDateForLog(new Date(mabdDate)) : 'N/A'));
+      
+      // Create record URL
+      var recordUrl = '';
+      try {
+        var domain = url.resolveDomain({ hostType: url.HostType.APPLICATION });
+        var relativePath = url.resolveRecord({
+          recordType: 'itemfulfillment',
+          recordId: ifId,
+          isEditMode: false
+        });
+        recordUrl = 'https://' + domain + relativePath;
+        log.debug('Routing Calculator - Email', 'Record URL created: ' + recordUrl);
+      } catch (urlError) {
+        log.error('Routing Calculator - Email', 'Error creating record URL: ' + urlError.toString());
+        recordUrl = 'Unable to generate record URL (IF ID: ' + ifId + ')';
+      }
+      
+      // Format MABD date for email
+      var mabdDateStr = 'N/A';
+      if (mabdDate) {
+        try {
+          var mabdDateObj = new Date(mabdDate);
+          mabdDateStr = formatDateForLog(mabdDateObj);
+        } catch (e) {
+          mabdDateStr = String(mabdDate);
+        }
+      }
+      
+      // Create email subject
+      var subject = 'Pickup Date Cannot Be Set - Item Fulfillment ' + ifTranId;
+      
+      // Create email body (using HTML line breaks since we're using HTML link)
+      var body = 'The pickup date could not be automatically set on an Item Fulfillment.' + '<br><br>';
+      body += 'Reason: ' + reason + '<br><br>';
+      body += 'MABD Date: ' + mabdDateStr + '<br>';
+      body += 'Record Link: <a href="' + recordUrl + '">Item Fulfillment ' + ifTranId + '</a><br><br>';
+      body += 'Please review the Item Fulfillment and manually set the pickup date if needed.';
+      
+      // Send email
+      log.debug('Routing Calculator - Email', 'Email subject: ' + subject);
+      log.debug('Routing Calculator - Email', 'Email recipients: dhodes@joolbaby.com, Yoelg@joolbaby.com');
+      log.debug('Routing Calculator - Email', 'Email author ID: 2536 (hardcoded)');
+      email.send({
+        author: 2536,
+        recipients: ['dhodes@joolbaby.com', 'Yoelg@joolbaby.com'],  
+        subject: subject,
+        body: body
+      });
+      
+      log.audit('Routing Calculator', 'Sent pickup date error email for IF ' + ifTranId);
+      log.debug('Routing Calculator - Email', '=== EMAIL SENT SUCCESSFULLY ===');
+      
+    } catch (emailError) {
+      log.error('Routing Calculator - Email', 'Error sending pickup date error email: ' + emailError.toString());
+      log.error('Routing Calculator - Email', 'Error stack: ' + (emailError.stack || 'N/A'));
+    }
+  }
+  
+  /**
+   * Sends an email notification when items have missing Units Per Pallet (UPP)
+   * @param {string} ifTranId - Item Fulfillment transaction ID
+   * @param {string|number} ifId - Item Fulfillment internal ID
+   * @param {Array} missingUPPItems - Array of objects with item info that have missing UPP
+   * @param {string} locationName - Location name
+   */
+  function sendMissingUPPErrorEmail(ifTranId, ifId, missingUPPItems, locationName) {
+    try {
+      log.debug('Routing Calculator - Email', '=== SENDING MISSING UPP ERROR EMAIL ===');
+      log.debug('Routing Calculator - Email', 'IF TranID: ' + ifTranId);
+      log.debug('Routing Calculator - Email', 'IF ID: ' + ifId);
+      log.debug('Routing Calculator - Email', 'Number of items with missing UPP: ' + missingUPPItems.length);
+      
+      // Create record URL
+      var recordUrl = '';
+      try {
+        var domain = url.resolveDomain({ hostType: url.HostType.APPLICATION });
+        var relativePath = url.resolveRecord({
+          recordType: 'itemfulfillment',
+          recordId: ifId,
+          isEditMode: false
+        });
+        recordUrl = 'https://' + domain + relativePath;
+        log.debug('Routing Calculator - Email', 'Record URL created: ' + recordUrl);
+      } catch (urlError) {
+        log.error('Routing Calculator - Email', 'Error creating record URL: ' + urlError.toString());
+        recordUrl = 'Unable to generate record URL (IF ID: ' + ifId + ')';
+      }
+      
+      // Create email subject
+      var subject = 'Missing Units Per Pallet (UPP) - Item Fulfillment ' + ifTranId;
+      
+      // Create email body with list of items (using HTML line breaks since we're using HTML link)
+      var body = 'One or more items on Item Fulfillment ' + ifTranId + ' have missing/null/empty Units Per Pallet (UPP) fields.<br><br>';
+      body += 'Location: ' + (locationName || 'N/A') + '<br>';
+      body += 'Number of items with missing UPP: ' + missingUPPItems.length + '<br><br>';
+      body += 'Items with Missing UPP:<br>';
+      body += '----------------------------------------<br>';
+      
+      for (var i = 0; i < missingUPPItems.length; i++) {
+        var item = missingUPPItems[i];
+        body += (i + 1) + '. Item: ' + item.itemName + ' (ID: ' + item.itemId + ')<br>';
+        body += '&nbsp;&nbsp;&nbsp;Location: ' + item.locationName + ' (ID: ' + item.locationId + ')<br>';
+        body += '&nbsp;&nbsp;&nbsp;Quantity: ' + item.quantity + '<br>';
+        body += '&nbsp;&nbsp;&nbsp;UPP Field: ' + (item.locationId === '4' ? 'custitem_units_per_pallet_westmark' : 'custitemunits_per_pallet') + '<br><br>';
+      }
+      
+      body += 'Record Link: <a href="' + recordUrl + '">Item Fulfillment ' + ifTranId + '</a><br><br>';
+      body += 'Please update the Units Per Pallet fields on the items listed above and recalculate routing.';
+      
+      // Send email
+      log.debug('Routing Calculator - Email', 'Email subject: ' + subject);
+      log.debug('Routing Calculator - Email', 'Email recipients: dhodes@joolbaby.com, Yoelg@joolbaby.com');
+      log.debug('Routing Calculator - Email', 'Email author ID: 2536 (hardcoded)');
+      email.send({
+        author: 2536,
+        recipients: ['dhodes@joolbaby.com', 'Yoelg@joolbaby.com'],
+        subject: subject,
+        body: body
+      });
+      
+      log.audit('Routing Calculator', 'Sent missing UPP error email for IF ' + ifTranId);
+      log.debug('Routing Calculator - Email', '=== EMAIL SENT SUCCESSFULLY ===');
+      
+    } catch (emailError) {
+      log.error('Routing Calculator - Email', 'Error sending missing UPP error email: ' + emailError.toString());
+      log.error('Routing Calculator - Email', 'Error stack: ' + (emailError.stack || 'N/A'));
     }
   }
   
