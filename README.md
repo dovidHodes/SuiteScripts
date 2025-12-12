@@ -20,6 +20,8 @@ NetSuite automation scripts and utilities for EDI processing, invoice management
     │   ├── Integrated Shipping Labels/ # Integrated shipping labels from SPS packages
     │   ├── Package Deletion Diagnostics/ # Package deletion diagnostic tools
     │   ├── Packing_List/               # Packing slip PDF templates
+    │   ├── Pallet Assignment/          # Pallet assignment and calculation automation
+    │   ├── Pallet Labels/              # Pallet label generation and printing
     │   ├── SPS Scripts/                # SPS Commerce integration scripts
     │   │   ├── Autopack/               # SPS autopack functionality
     │   │   ├── Batch print/            # SPS batch label printing
@@ -188,6 +190,55 @@ Diagnostic tools for checking package deletion dependencies and issues.
 - `Package Deletion Diagnostics/checkPackageDependencies.js` - Diagnostic script for package deletion blockers
 
 See `scripts/Jool/Package Deletion Diagnostics/README.md` for detailed documentation.
+
+### Pallet Assignment
+Automated pallet assignment and calculation system for optimal pallet distribution across Item Fulfillments.
+
+**Key Features:**
+- Optimal pallet assignment algorithm (minimizes pallets, items can share)
+- Location-based UPP (units per pallet) calculation
+- Automatic pallet record creation
+- Map/Reduce processing for bulk operations
+- VPN (Vendor Part Number) mapping from Item Fulfillment item lines
+- JSON data storage on pallet records for label generation
+
+**Files:**
+- `_dsh_lib_calculate_and_assign_pallets.js` - Core library with pallet calculation and assignment logic
+- `_dsh_mr_assign_pallets.js` - Map/Reduce script for bulk pallet assignment
+- `_dsh_sl_assign_pallets.js` - Suitelet for manual pallet assignment
+
+**Key Features:**
+- Calculates optimal pallet assignments based on item UPP values
+- Creates pallet records with index and total count
+- Stores item and carton data in JSON format on pallet records
+- Maps item IDs to VPNs from Item Fulfillment item lines
+- Updates packages and package content with pallet assignments
+
+See `scripts/Jool/Pallet Assignment/README.md` and `scripts/Jool/Pallet Assignment/TROUBLESHOOTING.md` for detailed documentation.
+
+### Pallet Labels
+Automated pallet label generation with SKU/VPN display and SSCC barcode support.
+
+**Key Features:**
+- Advanced PDF/HTML template generation
+- SKU/VPN display logic (MIXED SKU for multiple items, VPN for single item)
+- SSCC (Serial Shipping Container Code) barcode generation
+- Carton count display
+- Ship from/to address formatting
+- PO barcode display
+- Carrier information (BOL, PRO, ARN)
+
+**Files:**
+- `_dsh_lib_pallet_label_generator.js` - Core library with label generation logic
+- `_dsh_lib_pallet_label_template.js` - FreeMarker template for label layout
+- `_dsh_sl_pallet_label_generate.js` - Suitelet for manual label generation
+
+**Key Features:**
+- Reads pallet data from pallet records and Item Fulfillments
+- Parses JSON data from pallet records for item and carton information
+- Displays "MIXED SKU" when multiple items on pallet, or VPN when single item
+- Generates SSCC barcode for pallet identification
+- Supports both button-triggered and automated generation
 
 ### Time Tracker
 Centralized time tracking system for measuring automation savings.
