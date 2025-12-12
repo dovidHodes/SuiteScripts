@@ -451,7 +451,6 @@ define([
       
       // Get ship from location
       var locationId = ifRecord.getValue('custbody_ship_from_location');
-      log.debug('Address Sourcing Debug', 'locationId from IF: ' + locationId);
       
       var locationName = '';
       var shipFromAddress = {};
@@ -467,9 +466,6 @@ define([
           locationName = locationRecord.getValue('name') || locationRecord.getValue('location') || '';
           var mainAddressText = locationRecord.getValue('mainaddress_text') || '';
           
-          log.debug('Address Sourcing Debug', 'locationName: ' + locationName);
-          log.debug('Address Sourcing Debug', 'mainaddress_text: ' + mainAddressText);
-          
           // Parse mainaddress_text by splitting on <br> tags
           var addressLines = [];
           if (mainAddressText) {
@@ -482,14 +478,6 @@ define([
               .filter(function(line) { return line.length > 0; });
           }
           
-          log.debug('Address Sourcing Debug', 'Parsed addressLines count: ' + addressLines.length);
-          log.debug('Address Sourcing Debug', 'addressLines: ' + JSON.stringify(addressLines));
-          
-          // Debug each line individually
-          for (var i = 0; i < addressLines.length; i++) {
-            log.debug('Address Sourcing Debug', 'addressLines[' + i + ']: [' + addressLines[i] + '] (length: ' + addressLines[i].length + ')');
-          }
-          
           shipFromDetails = {
             company: locationName || '',
             addressLines: addressLines
@@ -500,15 +488,9 @@ define([
             locationName: locationName,
             addressLines: addressLines
           };
-          
-          log.debug('Address Sourcing Debug', 'shipFromAddress: ' + JSON.stringify(shipFromAddress));
-          log.debug('Address Sourcing Debug', 'shipFromDetails: ' + JSON.stringify(shipFromDetails));
         } catch (e) {
           log.error('Error loading location', e);
-          log.debug('Address Sourcing Debug', 'Error loading location: ' + e.toString());
         }
-      } else {
-        log.debug('Address Sourcing Debug', 'No locationId found on IF record');
       }
       
       // Get carrier info
@@ -652,7 +634,7 @@ define([
                 shipcountry = shipAddress.getValue('shipcountry') || shipAddress.getValue('country') || '';
               }
             } catch (e) {
-              log.debug('Address Sourcing Debug', 'Error reading from shippingaddress subrecord: ' + e.message);
+              // Ignore subrecord errors
             }
           }
           
@@ -660,7 +642,6 @@ define([
           // shipaddress format: "AMAZON.COM 1101 E PEARL ST BURLINGTON NJ 08016-1934 United States"
           var shipaddress = ifRecord.getValue('shipaddress') || '';
           if (shipaddress && !shipaddr1) {
-            log.debug('Address Sourcing Debug', 'shipaddr1 still empty, trying to parse shipaddress field: [' + shipaddress + ']');
             // Remove HTML breaks if present
             var cleanAddress = shipaddress.replace(/<br\s*\/?>/gi, ' ').replace(/\s+/g, ' ').trim();
             
@@ -675,7 +656,6 @@ define([
                 var afterCompany = cleanAddress.substring(companyPos + shipcompany.length).trim();
                 var beforeCity = afterCompany.substring(0, afterCompany.toUpperCase().indexOf(shipcity.toUpperCase())).trim();
                 shipaddr1 = beforeCity;
-                log.debug('Address Sourcing Debug', 'Parsed shipaddr1 from shipaddress: [' + shipaddr1 + ']');
               }
             } else {
               // Fallback: parse by position (company is first, city is typically 4th from last)
@@ -685,33 +665,88 @@ define([
                 var cityIndex = addressParts.length - 4; // City is 4th from last (before state, zip, country)
                 if (cityIndex > companyIndex + 1) {
                   shipaddr1 = addressParts.slice(companyIndex + 1, cityIndex).join(' ');
-                  log.debug('Address Sourcing Debug', 'Parsed shipaddr1 from shipaddress (fallback): [' + shipaddr1 + ']');
                 }
               }
             }
           }
-          
-          log.debug('Address Sourcing Debug', 'Ship-to address from IF record (BOL approach):');
-          log.debug('Address Sourcing Debug', '  shipcompany: [' + shipcompany + ']');
-          log.debug('Address Sourcing Debug', '  shipaddr1: [' + shipaddr1 + ']');
-          log.debug('Address Sourcing Debug', '  shipaddr2: [' + shipaddr2 + ']');
-          log.debug('Address Sourcing Debug', '  shipcity: [' + shipcity + ']');
-          log.debug('Address Sourcing Debug', '  shipstate: [' + shipstate + ']');
-          log.debug('Address Sourcing Debug', '  shipzip: [' + shipzip + ']');
-          log.debug('Address Sourcing Debug', '  shipcountry: [' + shipcountry + ']');
         } catch (e) {
           log.debug('renderPalletLabelPdf', 'Could not load IF record for ship-to address: ' + e.message);
         }
       }
       
-      log.debug('Address Sourcing Debug', 'Ship-to address values (final):');
-      log.debug('Address Sourcing Debug', '  shipcompany: [' + shipcompany + ']');
-      log.debug('Address Sourcing Debug', '  shipaddr1: [' + shipaddr1 + ']');
-      log.debug('Address Sourcing Debug', '  shipaddr2: [' + shipaddr2 + ']');
-      log.debug('Address Sourcing Debug', '  shipcity: [' + shipcity + ']');
-      log.debug('Address Sourcing Debug', '  shipstate: [' + shipstate + ']');
-      log.debug('Address Sourcing Debug', '  shipzip: [' + shipzip + ']');
-      log.debug('Address Sourcing Debug', '  shipcountry: [' + shipcountry + ']');
+      // Get carton count from pallet record's custrecord17 field
+      var cartonCount = 0;
+      log.debug('Carton Count Debug', 'Starting carton count retrieval, palletId: ' + jsonData.palletId);
+      if (jsonData.palletId) {
+        try {
+          var palletRecord = record.load({
+            type: 'customrecord_asn_pallet',
+            id: jsonData.palletId,
+            isDynamic: false
+          });
+          log.debug('Carton Count Debug', 'Pallet record loaded successfully');
+          var custrecord17Value = palletRecord.getValue('custrecord17') || '';
+          log.debug('Carton Count Debug', 'custrecord17 raw value: [' + custrecord17Value + ']');
+          if (custrecord17Value) {
+            try {
+              var cartonData = JSON.parse(custrecord17Value);
+              log.debug('Carton Count Debug', 'Parsed JSON: ' + JSON.stringify(cartonData));
+              cartonCount = cartonData.totalCartons || 0;
+              log.debug('Carton Count Debug', 'Extracted totalCartons: ' + cartonCount);
+            } catch (e) {
+              log.debug('Carton Count Debug', 'Error parsing custrecord17 JSON: ' + e.message);
+            }
+          } else {
+            log.debug('Carton Count Debug', 'custrecord17 field is empty');
+          }
+        } catch (e) {
+          log.debug('Carton Count Debug', 'Error loading pallet record for carton count: ' + e.message);
+        }
+      } else {
+        log.debug('Carton Count Debug', 'No palletId provided in jsonData');
+      }
+      log.debug('Carton Count Debug', 'Final cartonCount value: ' + cartonCount);
+      
+      // Get SKU/VPN information from custrecord17 JSON
+      var skuDisplayText = '';
+      var cartonDataItems = [];
+      if (jsonData.palletId) {
+        try {
+          var palletRecordForSku = record.load({
+            type: 'customrecord_asn_pallet',
+            id: jsonData.palletId,
+            isDynamic: false
+          });
+          var custrecord17ValueForSku = palletRecordForSku.getValue('custrecord17') || '';
+          if (custrecord17ValueForSku) {
+            try {
+              var cartonDataForSku = JSON.parse(custrecord17ValueForSku);
+              cartonDataItems = cartonDataForSku.items || [];
+              log.debug('SKU Debug', 'Items in JSON: ' + cartonDataItems.length);
+              
+              if (cartonDataItems.length > 1) {
+                // More than one item = MIXED SKU
+                skuDisplayText = 'MIXED SKU';
+                log.debug('SKU Debug', 'Multiple items found, displaying MIXED SKU');
+              } else if (cartonDataItems.length === 1) {
+                // Single item - get VPN from the item object (already in JSON)
+                var item = cartonDataItems[0];
+                skuDisplayText = item.vpn || '';
+                log.debug('SKU Debug', 'Single item found, item: ' + JSON.stringify(item));
+                log.debug('SKU Debug', 'VPN from JSON: [' + skuDisplayText + ']');
+              } else if (cartonDataItems.length === 0) {
+                log.debug('SKU Debug', 'No items found in JSON array');
+              }
+            } catch (e) {
+              log.debug('SKU Debug', 'Error parsing custrecord17 JSON for SKU: ' + e.message);
+            }
+          }
+        } catch (e) {
+          log.debug('SKU Debug', 'Error loading pallet record for SKU: ' + e.message);
+        }
+      }
+      log.debug('SKU Debug', 'Final skuDisplayText: [' + skuDisplayText + ']');
+      log.debug('SKU Debug', 'Adding skuDisplayText to recordData: ' + skuDisplayText);
       
       // Build recordData exactly as before
       log.debug('renderPalletLabelPdf', 'Building recordData structure...');
@@ -721,6 +756,8 @@ define([
         custrecord_pallet_index: jsonData.palletNumber || 1,
         custrecord_total_pallet_count: jsonData.totalPallets || 1,
         custrecord_items: jsonData.asin || 'ASIN_PLACEHOLDER',
+        cartonCount: cartonCount,
+        skuDisplayText: skuDisplayText,
         custrecord_parent_if: {
           id: jsonData.ifId || '',
           tranid: jsonData.ifTranId || '',
@@ -744,28 +781,15 @@ define([
         }
       };
       
-      // HEAVY DEBUG: Address sourcing data - show what's actually in recordData
-      log.debug('Address Sourcing Debug', '=== FINAL recordData.custrecord_parent_if (being passed to template) ===');
-      log.debug('Address Sourcing Debug', 'Full custrecord_parent_if object: ' + JSON.stringify(recordData.custrecord_parent_if));
-      log.debug('Address Sourcing Debug', 'Ship-to fields in recordData:');
-      log.debug('Address Sourcing Debug', '  shipcompany: [' + recordData.custrecord_parent_if.shipcompany + '] (type: ' + typeof recordData.custrecord_parent_if.shipcompany + ')');
-      log.debug('Address Sourcing Debug', '  shipaddr1: [' + recordData.custrecord_parent_if.shipaddr1 + '] (type: ' + typeof recordData.custrecord_parent_if.shipaddr1 + ')');
-      log.debug('Address Sourcing Debug', '  shipaddr2: [' + recordData.custrecord_parent_if.shipaddr2 + '] (type: ' + typeof recordData.custrecord_parent_if.shipaddr2 + ')');
-      log.debug('Address Sourcing Debug', '  shipcity: [' + recordData.custrecord_parent_if.shipcity + '] (type: ' + typeof recordData.custrecord_parent_if.shipcity + ')');
-      log.debug('Address Sourcing Debug', '  shipstate: [' + recordData.custrecord_parent_if.shipstate + '] (type: ' + typeof recordData.custrecord_parent_if.shipstate + ')');
-      log.debug('Address Sourcing Debug', '  shipzip: [' + recordData.custrecord_parent_if.shipzip + '] (type: ' + typeof recordData.custrecord_parent_if.shipzip + ')');
-      log.debug('Address Sourcing Debug', '  shipcountry: [' + recordData.custrecord_parent_if.shipcountry + '] (type: ' + typeof recordData.custrecord_parent_if.shipcountry + ')');
-      log.debug('Address Sourcing Debug', '=== SHIP FROM location data ===');
-      log.debug('Address Sourcing Debug', 'custbody_ship_from_location: ' + JSON.stringify(recordData.custrecord_parent_if.custbody_ship_from_location));
+      // DEBUG: Carton count in recordData
+      log.debug('Carton Count Debug', '=== FINAL recordData (being passed to template) ===');
+      log.debug('Carton Count Debug', 'cartonCount: [' + recordData.cartonCount + '] (type: ' + typeof recordData.cartonCount + ')');
+      log.debug('SKU Debug', 'skuDisplayText in recordData: [' + recordData.skuDisplayText + ']');
+      log.debug('SKU Debug', 'Full recordData keys: ' + Object.keys(recordData).join(', '));
       
       // Add custom data source
       log.debug('renderPalletLabelPdf', 'Adding custom data source to renderer...');
       var dataSourceData = { record: recordData };
-      log.debug('Address Sourcing Debug', '=== Data being passed to addCustomDataSource ===');
-      log.debug('Address Sourcing Debug', 'dataSourceData.record.custrecord_parent_if.shipcompany: [' + dataSourceData.record.custrecord_parent_if.shipcompany + ']');
-      log.debug('Address Sourcing Debug', 'dataSourceData.record.custrecord_parent_if.shipcity: [' + dataSourceData.record.custrecord_parent_if.shipcity + ']');
-      log.debug('Address Sourcing Debug', 'dataSourceData.record.custrecord_parent_if.shipstate: [' + dataSourceData.record.custrecord_parent_if.shipstate + ']');
-      log.debug('Address Sourcing Debug', 'dataSourceData.record.custrecord_parent_if.shipzip: [' + dataSourceData.record.custrecord_parent_if.shipzip + ']');
       renderer.addCustomDataSource({
         format: render.DataSource.OBJECT,
         alias: 'JSON',

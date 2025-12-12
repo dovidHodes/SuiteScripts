@@ -56,7 +56,7 @@ define([], function () {
 '            .two-row-table td {\n' +
 '                width: 50%;\n' +
 '                vertical-align: top;\n' +
-'                padding: 2px;\n' +
+'                padding: 1px 2px;\n' +
 '                border-right: 2px solid #000000;\n' +
 '                border-bottom: 2px solid #000000;\n' +
 '                word-wrap: break-word;\n' +
@@ -66,12 +66,13 @@ define([], function () {
 '            .two-row-table tr:first-child td {\n' +
 '                border-top: 0;\n' +
 '                min-height: 80px;\n' +
-'                padding: 5px;\n' +
+'                padding: 2px 2px 0 5px;\n' +
 '            }\n' +
 '            \n' +
 '            .two-row-table tr:last-child td {\n' +
 '                border-bottom: 2px solid #000000;\n' +
 '                min-height: 80px;\n' +
+'                padding: 1px 2px;\n' +
 '            }\n' +
 '            \n' +
 '            .two-row-table td:first-child {\n' +
@@ -96,9 +97,14 @@ define([], function () {
 '                line-height: 1.8;\n' +
 '                padding: 0;\n' +
 '                margin: 0;\n' +
+'                margin-top: 0;\n' +
+'                margin-bottom: 0;\n' +
+'                padding-top: 0;\n' +
+'                padding-bottom: 0;\n' +
 '                word-wrap: break-word;\n' +
 '                overflow-wrap: break-word;\n' +
 '                overflow: visible;\n' +
+'                white-space: normal;\n' +
 '            }\n' +
 '            \n' +
 '            .address-line {\n' +
@@ -114,15 +120,16 @@ define([], function () {
 '                border-left: 0;\n' +
 '                border-right: 0;\n' +
 '                border-bottom: 2px solid #000000;\n' +
-'                min-height: 60px;\n' +
+'                min-height: 30px;\n' +
 '                box-sizing: border-box;\n' +
 '            }\n' +
 '            \n' +
 '            .carrier-info {\n' +
 '                font-size: 9pt;\n' +
-'                padding: 3px;\n' +
+'                padding: 0;\n' +
 '                word-wrap: break-word;\n' +
 '                overflow-wrap: break-word;\n' +
+'                color: #000000;\n' +
 '            }\n' +
   '            \n' +
   '            .carrier-label {\n' +
@@ -130,9 +137,10 @@ define([], function () {
   '            }\n' +
   '            \n' +
 '            .po-area {\n' +
-'                text-align: center;\n' +
-'                padding: 5px;\n' +
-'                vertical-align: middle;\n' +
+'                text-align: left;\n' +
+'                padding: 3px;\n' +
+'                vertical-align: top;\n' +
+'                font-size: 9pt;\n' +
 '            }\n' +
 '            \n' +
 '            .po-text {\n' +
@@ -247,17 +255,9 @@ define([], function () {
 '                </tr>\n' +
 '                <tr>\n' +
 '                    <td>\n' +
-'                        <div class="section-header">PO:</div>\n' +
-'                        <div class="po-area">\n' +
-'                            <#if record.custrecord_parent_if.custbody_sps_ponum_from_salesorder?has_content>\n' +
-'                                <div class="po-text">${record.custrecord_parent_if.custbody_sps_ponum_from_salesorder!""}</div>\n' +
-'                            </#if>\n' +
-'                        </div>\n' +
-'                    </td>\n' +
-'                    <td>\n' +
 '                        <#if record.custrecord_parent_if.custbody_sps_billofladingnumber?has_content || record.custrecord_parent_if.custbody_sps_carrierpronumber?has_content || record.custrecord_parent_if.custbody_amazon_arn?has_content>\n' +
-'                        <div class="section-header">CARRIER:</div>\n' +
-'                        <div class="carrier-info">\n' +
+'                        <div class="section-header" style="padding-left: 5px;">CARRIER:</div>\n' +
+'                        <div class="carrier-info" style="padding-left: 5px;">\n' +
 '                            <#if record.custrecord_parent_if.custbody_sps_billofladingnumber?has_content>\n' +
 '                                <span class="carrier-label">BOL #:</span> ${record.custrecord_parent_if.custbody_sps_billofladingnumber!""}<br/>\n' +
 '                            </#if>\n' +
@@ -272,53 +272,60 @@ define([], function () {
 '                            <div style="padding: 3px;">&nbsp;</div>\n' +
 '                        </#if>\n' +
 '                    </td>\n' +
+'                    <td>\n' +
+'                        <strong style="font-size: 8pt; font-weight: normal; margin-bottom: 0; margin-top: 0; display: block; color: #000000; padding-left: 5px;">PO:</strong>\n' +
+'                        <div class="carrier-info" style="display: flex; align-items: center; justify-content: center; padding: 0;">\n' +
+'                            <#if record.custrecord_parent_if.custbody_sps_ponum_from_salesorder?has_content>\n' +
+'                                <div style="text-align: center; max-width: 66px; width: 66px; overflow: hidden;">\n' +
+'                                    <barcode codetype="code128" showtext="true" height="40" value="${record.custrecord_parent_if.custbody_sps_ponum_from_salesorder!""}"/>\n' +
+'                                </div>\n' +
+'                            <#else>\n' +
+'                                <span style="color: #000000;">&nbsp;</span>\n' +
+'                            </#if>\n' +
+'                        </div>\n' +
+'                    </td>\n' +
 '                </tr>\n' +
 '                        </table>\n' +
 '            \n' +
 '            <!-- New Full-Width Box -->\n' +
 '            <div class="full-width-box">\n' +
-'                <div style="padding: 5px; text-align: center;">\n' +
-'                    <strong>Pallet ${record.custrecord_pallet_index!1} of ${record.custrecord_total_pallet_count!1}</strong>\n' +
-'                </div>\n' +
+'                <table style="width: 100%; border-collapse: collapse; padding: 5px;">\n' +
+'                    <tr>\n' +
+'                        <td style="padding: 5px; text-align: left; font-size: 11pt; width: 50%;">Pallet ${record.custrecord_pallet_index!1} of ${record.custrecord_total_pallet_count!1}</td>\n' +
+'                        <td style="padding: 5px; text-align: right; font-size: 11pt; width: 50%;">Cartons on pallet: ${record.cartonCount!0}</td>\n' +
+'                    </tr>\n' +
+'                </table>\n' +
 '            </div>\n' +
 '            \n' +
-'            <!-- Third Section: Pallet Count (Centered) -->\n' +
-  '            <div class="pallet-info" style="border-top: 1px solid #000000;">\n' +
-  '                <#if record.custrecord_total_pallet_count?has_content && record.custrecord_total_pallet_count > 1>\n' +
-  '                    <strong>Pallet ${record.custrecord_pallet_index!1} of ${record.custrecord_total_pallet_count!1}</strong>\n' +
-  '                <#else>\n' +
-  '                    <strong>Pallet ${record.custrecord_pallet_index!1} of ${record.custrecord_total_pallet_count!1}</strong>\n' +
-  '                </#if>\n' +
-  '            </div>\n' +
-  '            \n' +
-  '            <!-- Fourth Section: SINGLE ASIN -->\n' +
-  '            <div class="asin-section">\n' +
-  '                <#if custom?has_content && custom.asin?has_content>\n' +
-  '                    <div class="asin-text">SINGLE ASIN - ${custom.asin!""}</div>\n' +
-  '                <#elseif record.custrecord_items?has_content>\n' +
-  '                    <div class="asin-text">SINGLE ASIN - ${record.custrecord_items!""}</div>\n' +
-  '                <#else>\n' +
-  '                    <div class="asin-text">SINGLE ASIN</div>\n' +
-  '                </#if>\n' +
-  '            </div>\n' +
-  '            \n' +
-  '            <!-- Expiration Date Section -->\n' +
-  '            <div class="expiration-date">\n' +
-  '                <#if record.custrecord_expiration_date?has_content>\n' +
-  '                    Expiration Date: ${record.custrecord_expiration_date!""}\n' +
-  '                </#if>\n' +
-  '            </div>\n' +
-  '            \n' +
-'            <!-- Bottom Section: Pallet SSCC -->\n' +
-'            <div class="sscc-section">\n' +
-'                <div class="sscc-label">Pallet SSCC</div>\n' +
-'                <div class="sscc-text">(00) ${record.id!""}</div>\n' +
+'            <!-- New Full-Width Box 2 (Twice as tall) -->\n' +
+'            <div class="full-width-box" style="min-height: 80px; padding-left: 60px; padding-right: 60px;">\n' +
+'                <table style="width: 100%; border-collapse: collapse; padding: 5px;">\n' +
+'                    <tr>\n' +
+'                        <td style="padding: 5px; text-align: center; vertical-align: middle; font-size: 24pt; font-weight: normal; color: #000000;">${record.skuDisplayText!""}</td>\n' +
+'                    </tr>\n' +
+'                </table>\n' +
 '            </div>\n' +
-  '            \n' +
-  '        </div>\n' +
-  '        \n' +
-  '    </body>\n' +
-  '</pdf>';
+'            \n' +
+'            <!-- New Full-Width Box 3 (SSCC Barcode) -->\n' +
+'            <div class="full-width-box" style="min-height: 80px; border-bottom: 0; padding-left: 30px; padding-right: 30px;">\n' +
+'                <table style="width: 100%; border-collapse: collapse; padding: 5px;">\n' +
+'                    <tr>\n' +
+'                        <td style="padding: 5px; text-align: center; vertical-align: top;">\n' +
+'                            <div style="text-align: center; font-size: 9pt; font-weight: bold; color: #000000; margin-bottom: 5px;">PALLET SSCC</div>\n' +
+'                            <div class="carrier-info" style="display: flex; align-items: center; justify-content: center; padding: 0;">\n' +
+'                                <div style="text-align: center; overflow: hidden;">\n' +
+'                                    <barcode codetype="code128" showtext="true" height="60" value="(00) 123456789012345678"/>\n' +
+'                                </div>\n' +
+'                            </div>\n' +
+'                        </td>\n' +
+'                    </tr>\n' +
+'                </table>\n' +
+'            </div>\n' +
+'            \n' +
+'        </div>\n' +
+'        \n' +
+'    </body>\n' +
+'</pdf>';
     }
     
     return {

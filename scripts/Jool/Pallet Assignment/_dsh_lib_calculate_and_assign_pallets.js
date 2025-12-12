@@ -75,9 +75,10 @@ define([
       
       log.debug('UPP Field Selected', 'Location: ' + locationId + ', UPP Field: ' + uppFieldId);
       
-      // Step 3: Get UPP (units per pallet) for each item on IF
+      // Step 3: Get UPP (units per pallet) for each item on IF and build VPN map
       var itemUPP = {}; // {itemId: upp}
       var itemNames = {}; // {itemId: itemName}
+      var itemVpnMap = {}; // {itemId: vpn} - Map of itemId to VPN from column field on item list
       var lineCount = ifRecord.getLineCount({ sublistId: 'item' });
       
       for (var i = 0; i < lineCount; i++) {
@@ -88,6 +89,19 @@ define([
         });
         
         if (!itemId) continue;
+        
+        // Get VPN from column field on item list (vendorpartnumber)
+        var vpn = ifRecord.getSublistValue({
+          sublistId: 'item',
+          fieldId: 'custcol_sps_vendorpartnumber',
+          line: i
+        }) || '';
+        
+        
+        // Store VPN in map
+        if (vpn) {
+          itemVpnMap[itemId] = vpn;
+        }
         
         // Load item record and get UPP based on location
         var itemRecord = record.load({
@@ -111,6 +125,8 @@ define([
           result.errors.push(errorMsg);
         }
       }
+      
+      log.debug('VPN Map Built', 'Built VPN map with ' + Object.keys(itemVpnMap).length + ' item(s)');
       
       // Step 4: Search all SPS packages for IF
       var packages = [];
@@ -256,7 +272,7 @@ define([
       // Step 8: Trigger Map/Reduce script for every 100 pallets
       if (palletAssignments.length > 0) {
         try {
-          triggerMapReduceForAssignments(ifId, ifTranId, palletAssignments, result);
+          triggerMapReduceForAssignments(ifId, ifTranId, palletAssignments, itemVpnMap, result);
         } catch (mrError) {
           var errorMsg = 'Failed to trigger Map/Reduce script: ' + mrError.toString();
           log.error('Map/Reduce Trigger Error', errorMsg);
@@ -511,9 +527,10 @@ define([
    * @param {string} ifId - Item Fulfillment ID
    * @param {string} ifTranId - Item Fulfillment transaction ID
    * @param {Array} palletAssignments - Array of pallet assignment objects
+   * @param {Object} itemVpnMap - Map of itemId to VPN
    * @param {Object} result - Result object to add MR task IDs to
    */
-  function triggerMapReduceForAssignments(ifId, ifTranId, palletAssignments, result) {
+  function triggerMapReduceForAssignments(ifId, ifTranId, palletAssignments, itemVpnMap, result) {
     var BATCH_SIZE = 100;
     var mrScriptId = 'customscript_assign_packages_to_pallets';
     var mrDeployId = 'customdeploy1';
@@ -545,7 +562,8 @@ define([
           ifTranId: ifTranId,
           palletAssignments: batch,
           batchNumber: batchNumber,
-          totalBatches: batches.length
+          totalBatches: batches.length,
+          itemVpnMap: itemVpnMap  // Pass the VPN map to MR script
         };
         
         var jsonParam = JSON.stringify(assignmentData);

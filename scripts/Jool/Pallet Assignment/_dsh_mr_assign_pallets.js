@@ -252,12 +252,25 @@ define([
       var palletAssignments = assignmentData.palletAssignments || [];
       var batchNumber = assignmentData.batchNumber || 1;
       var totalBatches = assignmentData.totalBatches || 1;
+      var itemVpnMap = assignmentData.itemVpnMap || {};  // Get VPN map from assignment data
       
       log.debug('map', 'IF ' + ifTranId + ' - Processing batch ' + batchNumber + ' of ' + totalBatches + ' with ' + palletAssignments.length + ' pallet assignment(s)');
+      log.debug('map', 'VPN Map received with ' + Object.keys(itemVpnMap).length + ' item(s)');
       
       // Emit each pallet assignment
       for (var i = 0; i < palletAssignments.length; i++) {
         var assignment = palletAssignments[i];
+        
+        // Add VPN to each item in the items array using the map
+        var itemsWithVpn = (assignment.items || []).map(function(item) {
+          var itemWithVpn = {
+            itemId: item.itemId,
+            quantity: item.quantity,
+            cartons: item.cartons,
+            vpn: itemVpnMap[item.itemId] || ''  // Add VPN from map
+          };
+          return itemWithVpn;
+        });
         
         var dataToEmit = {
           ifId: ifId,
@@ -266,7 +279,7 @@ define([
           palletId: assignment.palletId,
           packageIds: assignment.packageIds || [],
           contentIds: assignment.contentIds || [],
-          items: assignment.items || [],  // Array of {itemId, quantity, cartons}
+          items: itemsWithVpn,  // Array of {itemId, quantity, cartons, vpn}
           totalCartons: assignment.totalCartons || 0,  // Total carton count for this pallet
           batchNumber: batchNumber,
           totalBatches: totalBatches
@@ -377,9 +390,9 @@ define([
             log.debug('reduce', 'IF ' + tranId + ' - Using existing pallet ' + palletId);
           }
           
-          // Create JSON for pallet with items and total cartons
+          // Create JSON for pallet with items (including VPN) and total cartons
           var palletJson = {
-            items: assignment.items || [],
+            items: assignment.items || [],  // Items already have VPN from map phase
             totalCartons: assignment.totalCartons || 0
           };
           var palletJsonString = JSON.stringify(palletJson);
