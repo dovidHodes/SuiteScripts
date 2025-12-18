@@ -8,10 +8,8 @@
 
 define([
   'N/record',
-  'N/log',
-  'N/email',
-  'N/url'
-], function (record, log, email, url) {
+  'N/log'
+], function (record, log) {
   
   /**
    * Calculates and applies all routing fields to an Item Fulfillment
@@ -345,22 +343,37 @@ define([
             pickupDateSet = true;
             log.debug('Routing Calculator', 'Set pickup date to ' + formatDateForLog(pickupDateResult.date));
           } else {
-            // Send email notification when pickup date cannot be set
+            // Set error message in field instead of sending email
             pickupDateError = true;
-            log.debug('Routing Calculator', 'Pickup date could not be set. Reason: ' + pickupDateResult.reason + '. Sending email notification...');
-            sendPickupDateErrorEmail(ifTranId, ifId, pickupDateResult.reason, mabdDate);
+            var errorMessage = 'Pickup date could not be set. Reason: ' + pickupDateResult.reason;
+            if (mabdDate) {
+              errorMessage += ' (MABD: ' + formatDateForLog(new Date(mabdDate)) + ')';
+            }
+            ifRecord.setValue({
+              fieldId: 'custbody_routing_request_issue',
+              value: errorMessage
+            });
+            log.debug('Routing Calculator', 'Pickup date could not be set. Reason: ' + pickupDateResult.reason + '. Set error message in custbody_routing_request_issue field.');
           }
         } else {
-          // Send email notification when MABD is missing
+          // Set error message in field instead of sending email
           pickupDateError = true;
-          log.debug('Routing Calculator', 'MABD date is missing on Item Fulfillment. Sending email notification...');
-          sendPickupDateErrorEmail(ifTranId, ifId, 'MABD date is missing on the Item Fulfillment', null);
+          var errorMessage = 'MABD date is missing on the Item Fulfillment';
+          ifRecord.setValue({
+            fieldId: 'custbody_routing_request_issue',
+            value: errorMessage
+          });
+          log.debug('Routing Calculator', 'MABD date is missing on Item Fulfillment. Set error message in custbody_routing_request_issue field.');
         }
       } catch (dateError) {
         pickupDateError = true;
         log.error('Routing Calculator', 'Error setting pickup date: ' + dateError.toString());
-        // Send email notification for unexpected errors
-        sendPickupDateErrorEmail(ifTranId, ifId, 'Error setting pickup date: ' + dateError.toString(), null);
+        // Set error message in field instead of sending email
+        var errorMessage = 'Error setting pickup date: ' + dateError.toString();
+        ifRecord.setValue({
+          fieldId: 'custbody_routing_request_issue',
+          value: errorMessage
+        });
       }
       
       // Set routing status based on conditions
@@ -379,9 +392,18 @@ define([
         });
         log.debug('Routing Calculator', 'Set routing status to 4 (pickup date could not be set)');
       } else if (hasMissingUPP) {
-        // Send email notification when UPP is missing
-        log.debug('Routing Calculator', 'Missing UPP detected. Sending email notification...');
-        sendMissingUPPErrorEmail(ifTranId, ifId, missingUPPItems, locationName);
+        // Set error message in field instead of sending email
+        var uppErrorMsg = 'Missing Units Per Pallet (UPP) fields. Location: ' + locationName + '. Items: ';
+        var itemNames = [];
+        for (var u = 0; u < missingUPPItems.length; u++) {
+          itemNames.push(missingUPPItems[u].itemName + ' (ID: ' + missingUPPItems[u].itemId + ')');
+        }
+        uppErrorMsg += itemNames.join(', ');
+        ifRecord.setValue({
+          fieldId: 'custbody_routing_request_issue',
+          value: uppErrorMsg
+        });
+        log.debug('Routing Calculator', 'Missing UPP detected. Set error message in custbody_routing_request_issue field.');
         log.audit('Routing Calculator', 
                     'NOT setting routing status to 1 because one or more items have missing/null/empty units per pallet field. ' +
                     'Please update item UPP fields and recalculate routing.');
@@ -605,149 +627,6 @@ define([
     } catch (e) {
       log.error('Routing Calculator', 'Error calculating business days: ' + e.toString());
       return null;
-    }
-  }
-  
-  /**
-   * Sends an email notification when pickup date cannot be set
-   * @param {string} ifTranId - Item Fulfillment transaction ID
-   * @param {string|number} ifId - Item Fulfillment internal ID
-   * @param {string} reason - Reason why pickup date could not be set
-   * @param {Date|string|null} mabdDate - MABD date if available
-   */
-  function sendPickupDateErrorEmail(ifTranId, ifId, reason, mabdDate) {
-    try {
-      log.debug('Routing Calculator - Email', '=== SENDING PICKUP DATE ERROR EMAIL ===');
-      log.debug('Routing Calculator - Email', 'IF TranID: ' + ifTranId);
-      log.debug('Routing Calculator - Email', 'IF ID: ' + ifId);
-      log.debug('Routing Calculator - Email', 'Reason: ' + reason);
-      log.debug('Routing Calculator - Email', 'MABD Date: ' + (mabdDate ? formatDateForLog(new Date(mabdDate)) : 'N/A'));
-      
-      // Create record URL
-      var recordUrl = '';
-      try {
-        var domain = url.resolveDomain({ hostType: url.HostType.APPLICATION });
-        var relativePath = url.resolveRecord({
-          recordType: 'itemfulfillment',
-          recordId: ifId,
-          isEditMode: false
-        });
-        recordUrl = 'https://' + domain + relativePath;
-        log.debug('Routing Calculator - Email', 'Record URL created: ' + recordUrl);
-      } catch (urlError) {
-        log.error('Routing Calculator - Email', 'Error creating record URL: ' + urlError.toString());
-        recordUrl = 'Unable to generate record URL (IF ID: ' + ifId + ')';
-      }
-      
-      // Format MABD date for email
-      var mabdDateStr = 'N/A';
-      if (mabdDate) {
-        try {
-          var mabdDateObj = new Date(mabdDate);
-          mabdDateStr = formatDateForLog(mabdDateObj);
-        } catch (e) {
-          mabdDateStr = String(mabdDate);
-        }
-      }
-      
-      // Create email subject
-      var subject = 'Pickup Date Cannot Be Set - Item Fulfillment ' + ifTranId;
-      
-      // Create email body (using HTML line breaks since we're using HTML link)
-      var body = 'The pickup date could not be automatically set on an Item Fulfillment.' + '<br><br>';
-      body += 'Reason: ' + reason + '<br><br>';
-      body += 'MABD Date: ' + mabdDateStr + '<br>';
-      body += 'Record Link: <a href="' + recordUrl + '">Item Fulfillment ' + ifTranId + '</a><br><br>';
-      body += 'Please review the Item Fulfillment and manually set the pickup date if needed.';
-      
-      // Send email
-      log.debug('Routing Calculator - Email', 'Email subject: ' + subject);
-      log.debug('Routing Calculator - Email', 'Email recipients: dhodes@joolbaby.com, Yoelg@joolbaby.com');
-      log.debug('Routing Calculator - Email', 'Email author ID: 2536 (hardcoded)');
-      email.send({
-        author: 2536,
-        recipients: ['dhodes@joolbaby.com', 'Yoelg@joolbaby.com'],  
-        subject: subject,
-        body: body
-      });
-      
-      log.audit('Routing Calculator', 'Sent pickup date error email for IF ' + ifTranId);
-      log.debug('Routing Calculator - Email', '=== EMAIL SENT SUCCESSFULLY ===');
-      
-    } catch (emailError) {
-      log.error('Routing Calculator - Email', 'Error sending pickup date error email: ' + emailError.toString());
-      log.error('Routing Calculator - Email', 'Error stack: ' + (emailError.stack || 'N/A'));
-    }
-  }
-  
-  /**
-   * Sends an email notification when items have missing Units Per Pallet (UPP)
-   * @param {string} ifTranId - Item Fulfillment transaction ID
-   * @param {string|number} ifId - Item Fulfillment internal ID
-   * @param {Array} missingUPPItems - Array of objects with item info that have missing UPP
-   * @param {string} locationName - Location name
-   */
-  function sendMissingUPPErrorEmail(ifTranId, ifId, missingUPPItems, locationName) {
-    try {
-      log.debug('Routing Calculator - Email', '=== SENDING MISSING UPP ERROR EMAIL ===');
-      log.debug('Routing Calculator - Email', 'IF TranID: ' + ifTranId);
-      log.debug('Routing Calculator - Email', 'IF ID: ' + ifId);
-      log.debug('Routing Calculator - Email', 'Number of items with missing UPP: ' + missingUPPItems.length);
-      
-      // Create record URL
-      var recordUrl = '';
-      try {
-        var domain = url.resolveDomain({ hostType: url.HostType.APPLICATION });
-        var relativePath = url.resolveRecord({
-          recordType: 'itemfulfillment',
-          recordId: ifId,
-          isEditMode: false
-        });
-        recordUrl = 'https://' + domain + relativePath;
-        log.debug('Routing Calculator - Email', 'Record URL created: ' + recordUrl);
-      } catch (urlError) {
-        log.error('Routing Calculator - Email', 'Error creating record URL: ' + urlError.toString());
-        recordUrl = 'Unable to generate record URL (IF ID: ' + ifId + ')';
-      }
-      
-      // Create email subject
-      var subject = 'Missing Units Per Pallet (UPP) - Item Fulfillment ' + ifTranId;
-      
-      // Create email body with list of items (using HTML line breaks since we're using HTML link)
-      var body = 'One or more items on Item Fulfillment ' + ifTranId + ' have missing/null/empty Units Per Pallet (UPP) fields.<br><br>';
-      body += 'Location: ' + (locationName || 'N/A') + '<br>';
-      body += 'Number of items with missing UPP: ' + missingUPPItems.length + '<br><br>';
-      body += 'Items with Missing UPP:<br>';
-      body += '----------------------------------------<br>';
-      
-      for (var i = 0; i < missingUPPItems.length; i++) {
-        var item = missingUPPItems[i];
-        body += (i + 1) + '. Item: ' + item.itemName + ' (ID: ' + item.itemId + ')<br>';
-        body += '&nbsp;&nbsp;&nbsp;Location: ' + item.locationName + ' (ID: ' + item.locationId + ')<br>';
-        body += '&nbsp;&nbsp;&nbsp;Quantity: ' + item.quantity + '<br>';
-        body += '&nbsp;&nbsp;&nbsp;UPP Field: ' + (item.locationId === '4' ? 'custitem_units_per_pallet_westmark' : 'custitemunits_per_pallet') + '<br><br>';
-      }
-      
-      body += 'Record Link: <a href="' + recordUrl + '">Item Fulfillment ' + ifTranId + '</a><br><br>';
-      body += 'Please update the Units Per Pallet fields on the items listed above and recalculate routing.';
-      
-      // Send email
-      log.debug('Routing Calculator - Email', 'Email subject: ' + subject);
-      log.debug('Routing Calculator - Email', 'Email recipients: dhodes@joolbaby.com, Yoelg@joolbaby.com');
-      log.debug('Routing Calculator - Email', 'Email author ID: 2536 (hardcoded)');
-      email.send({
-        author: 2536,
-        recipients: ['dhodes@joolbaby.com', 'Yoelg@joolbaby.com'],
-        subject: subject,
-        body: body
-      });
-      
-      log.audit('Routing Calculator', 'Sent missing UPP error email for IF ' + ifTranId);
-      log.debug('Routing Calculator - Email', '=== EMAIL SENT SUCCESSFULLY ===');
-      
-    } catch (emailError) {
-      log.error('Routing Calculator - Email', 'Error sending missing UPP error email: ' + emailError.toString());
-      log.error('Routing Calculator - Email', 'Error stack: ' + (emailError.stack || 'N/A'));
     }
   }
   

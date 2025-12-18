@@ -207,13 +207,6 @@ define([
             value: ifId
           });
           
-          if (entityId) {
-            palletRecord.setValue({
-              fieldId: 'custrecord8',
-              value: entityId
-            });
-          }
-          
           // Set percentage used
           var usagePercentage = palletAssignments[p].usage || 0;
           palletRecord.setValue({
@@ -232,6 +225,14 @@ define([
             fieldId: 'custrecord_total_pallet_count',
             value: totalPallets
           });
+          
+          // Set customer field LAST to prevent sourcing from clearing it
+          if (entityId) {
+            palletRecord.setValue({
+              fieldId: 'custrecord8',
+              value: parseInt(entityId, 10)
+            });
+          }
           
           var palletId = palletRecord.save({
             enableSourcing: false,
@@ -590,7 +591,7 @@ define([
         var errorName = submitError.name || '';
         
         if (errorName === 'MAP_REDUCE_ALREADY_RUNNING') {
-          log.warning('triggerMapReduceForAssignments', 'IF ' + ifTranId + ' - MR deployment ' + mrDeployId + ' is busy for batch ' + batchNumber + '. Will retry on next run.');
+          log.audit('triggerMapReduceForAssignments', 'IF ' + ifTranId + ' - MR deployment ' + mrDeployId + ' is busy for batch ' + batchNumber + '. Will retry on next run.');
         } else {
           var errorMsg = 'IF ' + ifTranId + ' - Failed to submit MR batch ' + batchNumber + ': ' + submitError.toString();
           log.error('triggerMapReduceForAssignments', errorMsg);

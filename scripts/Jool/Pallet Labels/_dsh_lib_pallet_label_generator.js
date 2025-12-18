@@ -14,8 +14,9 @@ define([
   'N/log',
   'N/file',
   'N/url',
-  './_dsh_lib_pallet_label_template'
-], function (search, render, record, log, file, url, templateLib) {
+  './_dsh_lib_pallet_label_template',
+  './_dsh_lib_barcode_generator'
+], function (search, render, record, log, file, url, templateLib, barcodeLib) {
   
   /**
    * Main function to generate pallet label PDF
@@ -64,7 +65,108 @@ define([
       // Step 2: Use provided folder ID or default
       pdfFolderId = pdfFolderId || 1373; // Default folder ID (same as BOL)
       
-      // Step 3: Generate PDF using render module
+      // Step 3: Generate barcode if SSCC exists
+      var barcodeFileId = null;
+      var barcodeImageUrl = null;
+      if (jsonData.ssccBarcode && jsonData.ssccBarcode.length === 20) {
+        try {
+          log.debug('generatePalletLabel', 'Generating barcode for SSCC: ' + jsonData.ssccBarcode);
+          
+          // Generate barcode (returns image data only)
+          // We'll add the SSCC text manually in the template
+          var barcodeResult = barcodeLib.generateBarcode(jsonData.ssccBarcode, {
+            format: 'png',
+            type: 'gs1-128',
+            width: 300,   // Width in pixels
+            height: 50    // Height in pixels
+          });
+          
+          if (barcodeResult && barcodeResult.success && barcodeResult.data) {
+            // Get file type - barcode generator returns string ('PNGIMAGE' or 'SVG')
+            var barcodeFileType = barcodeResult.fileType || 'PNGIMAGE';
+            var barcodeFileExtension = barcodeResult.fileExtension || 'png';
+            
+            if (!barcodeFileType) {
+              log.error('Barcode Result Missing fileType', 'barcodeResult keys: ' + Object.keys(barcodeResult).join(', '));
+              throw new Error('Barcode result missing fileType');
+            }
+            
+            // Save barcode file to file cabinet
+            var barcodeFileName = 'SSCC_Barcode_' + (palletId || ifId) + '.' + barcodeFileExtension;
+            
+            log.debug('Creating Barcode File', 'FileType: ' + barcodeFileType + ' (type: ' + typeof barcodeFileType + '), Extension: ' + barcodeFileExtension + ', Data length: ' + barcodeResult.data.length);
+            
+            var barcodeFile = file.create({
+              name: barcodeFileName,
+              fileType: barcodeFileType,
+              contents: barcodeResult.data,
+              folder: pdfFolderId,
+              description: 'Barcode for SSCC: ' + jsonData.ssccBarcode
+            });
+            
+            barcodeFileId = barcodeFile.save();
+            log.debug('generatePalletLabel', 'Barcode file saved: ' + barcodeFileId);
+            
+            // Attach barcode file to pallet record
+            if (barcodeFileId && palletId) {
+              try {
+                record.attach({
+                  record: {
+                    type: 'file',
+                    id: barcodeFileId
+                  },
+                  to: {
+                    type: 'customrecord_asn_pallet',
+                    id: palletId
+                  }
+                });
+                log.debug('generatePalletLabel', 'Barcode file attached to pallet record');
+              } catch (attachError) {
+                log.error('Error attaching barcode file', attachError);
+              }
+            }
+            
+            // Get barcode image as base64 data URI for template (PDF renderer doesn't support external URLs)
+            try {
+              // Use the barcode data directly from the API response (already base64-encoded)
+              // The API returns PNG as base64 string (starts with "iVBORw0KGgo...")
+              var barcodeBase64 = barcodeResult.data;
+              
+              // Create data URI for embedding in PDF
+              // Format: data:image/png;base64,<base64data>
+              var barcodeDataUri = 'data:image/png;base64,' + barcodeBase64;
+              
+              log.debug('generatePalletLabel', 'Barcode data URI created, length: ' + barcodeDataUri.length);
+              
+              // Also get URL for reference (though we'll use data URI in template)
+              var barcodeFileObj = file.load({ id: barcodeFileId });
+              var domain = url.resolveDomain({ hostType: url.HostType.APPLICATION });
+              barcodeImageUrl = 'https://' + domain + barcodeFileObj.url;
+              
+              // Add barcode data URI (for PDF) and URL (for reference) to JSON data
+              jsonData.barcodeImageDataUri = barcodeDataUri;  // Use this in template
+              jsonData.barcodeImageUrl = barcodeImageUrl;      // Keep for reference
+              jsonData.barcodeFileId = barcodeFileId;
+              // Use the same formatted text that was sent to the barcode API: (00)108425590000000851
+              jsonData.ssccDisplayText = barcodeResult.barcodeText || jsonData.sscc;
+              log.debug('generatePalletLabel', 'Barcode text for display: ' + jsonData.ssccDisplayText);
+            } catch (urlError) {
+              log.error('Error getting barcode data', urlError);
+            }
+            
+            log.audit('Barcode Generated', 'Barcode file ID: ' + barcodeFileId + ', SSCC: ' + jsonData.ssccBarcode);
+          } else {
+            log.error('Barcode Generation Failed', 'No data returned from barcode generator');
+          }
+        } catch (barcodeError) {
+          log.error('Barcode Generation Error', 'SSCC: ' + jsonData.ssccBarcode + ', Error: ' + barcodeError.toString());
+          // Don't fail label generation if barcode fails
+        }
+      } else {
+        log.debug('generatePalletLabel', 'No SSCC found or SSCC is not 20 digits. SSCC: ' + (jsonData.ssccBarcode || 'not found'));
+      }
+      
+      // Step 4: Generate PDF using render module
       if (!templateId || templateId === '') {
         templateId = 'CUSTTMPL_NEW_PALLET'; // Default template ID
       }
@@ -203,17 +305,22 @@ define([
       var palletNumber = palletRecord.getValue('custrecord_pallet_index') || 1;
       var totalPallets = palletRecord.getValue('custrecord_total_pallet_count') || 1;
       
-      // Get SSCC (Serial Shipping Container Code) - can be generated or stored on pallet
-      var sscc = palletRecord.getValue('custrecord_pallet_sscc') || '';
-      if (!sscc) {
-        // Generate SSCC format: (00) + 18 digits
-        // For now, use pallet ID padded, but this should be a proper SSCC generation
-        var palletIdStr = String(palletId);
-        while (palletIdStr.length < 18) {
-          palletIdStr = '0' + palletIdStr;
-        }
-        sscc = '(00) ' + palletIdStr;
-      }
+      // Get SSCC (Serial Shipping Container Code) from pallet record field custrecord_sscc
+      // Value will be 20 digits with zeroes
+      var ssccRaw = palletRecord.getValue('custrecord_sscc') || '';
+      log.debug('SSCC Debug - collectPalletData', 'Pallet ID: ' + palletId + ', ssccRaw from field: "' + ssccRaw + '", length: ' + ssccRaw.length);
+      
+      // Extract just the digits (in case there's any formatting) - keep full 20 digits
+      var ssccDigits = ssccRaw.replace(/[^0-9]/g, '');
+      log.debug('SSCC Debug - collectPalletData', 'ssccDigits after cleanup: "' + ssccDigits + '", length: ' + ssccDigits.length);
+      
+      // For barcode: Use the 20-digit value directly from the field
+      var ssccBarcode = ssccDigits; // 20-digit value from custrecord_sscc field
+      log.debug('SSCC Debug - collectPalletData', 'ssccBarcode formatted: "' + ssccBarcode + '", length: ' + ssccBarcode.length);
+      
+      // For display: Show the full 20-digit value (human-readable)
+      var sscc = ssccDigits;
+      log.debug('SSCC Debug - collectPalletData', 'sscc for display: "' + sscc + '", length: ' + sscc.length);
       
       // Build JSON data object for template
       var jsonData = {
@@ -245,11 +352,15 @@ define([
         asin: asin,
         // Barcodes
         poBarcode: (ifData && ifData.poNumber) || '',
-        sscc: sscc,
-        ssccBarcode: sscc.replace(/[^0-9]/g, ''), // SSCC without formatting for barcode
+        sscc: sscc, // SSCC value from custrecord_sscc field (20 digits) - for display
+        ssccBarcode: ssccBarcode, // SSCC value from custrecord_sscc field (20 digits) - used directly for barcode
+        ssccDisplayText: '', // Will be set after barcode generation with formatted text: (00)108425590000000851
         barcode: palletId,
         qrCode: palletId
       };
+      
+      log.debug('SSCC Debug - collectPalletData', 'Final jsonData.ssccBarcode: "' + jsonData.ssccBarcode + '", length: ' + (jsonData.ssccBarcode ? jsonData.ssccBarcode.length : 0));
+      log.debug('SSCC Debug - collectPalletData', 'Final jsonData.sscc: "' + jsonData.sscc + '", length: ' + (jsonData.sscc ? jsonData.sscc.length : 0));
       
       log.debug('collectPalletData', 'Built jsonData - locationId: ' + jsonData.locationId + ', hasShipFromAddress: ' + (jsonData.shipFromAddress && Object.keys(jsonData.shipFromAddress).length > 0));
       log.audit('collectPalletData', 'Data collected successfully for pallet: ' + palletName);
@@ -347,23 +458,36 @@ define([
       }
       
       // Get SSCC
+      // Get SSCC (Serial Shipping Container Code) from pallet record field custrecord_sscc
+      // Value will be 20 digits with zeroes
+      var ssccRaw = '';
+      var ssccBarcode = '';
       var sscc = '';
+      
       try {
         var palletRecord = record.load({
           type: 'customrecord_asn_pallet',
           id: targetPallet.palletId,
           isDynamic: false
         });
-        sscc = palletRecord.getValue('custrecord_pallet_sscc') || '';
-        if (!sscc) {
-          var palletIdStr = String(targetPallet.palletId);
-          while (palletIdStr.length < 18) {
-            palletIdStr = '0' + palletIdStr;
-          }
-          sscc = '(00) ' + palletIdStr;
-        }
+        ssccRaw = palletRecord.getValue('custrecord_sscc') || '';
+        log.debug('SSCC Debug - collectIFPalletData', 'Pallet ID: ' + targetPallet.palletId + ', ssccRaw from field: "' + ssccRaw + '", length: ' + ssccRaw.length);
+        
+        // Extract just the digits (in case there's any formatting) - keep full 20 digits
+        var ssccDigits = ssccRaw.replace(/[^0-9]/g, '');
+        log.debug('SSCC Debug - collectIFPalletData', 'ssccDigits after cleanup: "' + ssccDigits + '", length: ' + ssccDigits.length);
+        
+        // For barcode: Use the 20-digit value directly from the field
+        ssccBarcode = ssccDigits; // 20-digit value from custrecord_sscc field
+        log.debug('SSCC Debug - collectIFPalletData', 'ssccBarcode formatted: "' + ssccBarcode + '", length: ' + ssccBarcode.length);
+        
+        // For display: Show the full 20-digit value (human-readable)
+        sscc = ssccDigits;
+        log.debug('SSCC Debug - collectIFPalletData', 'sscc for display: "' + sscc + '", length: ' + sscc.length);
       } catch (e) {
-        sscc = '(00) ' + String(targetPallet.palletId).padStart(18, '0');
+        log.error('Error loading pallet record for SSCC', 'Pallet ID: ' + targetPallet.palletId + ', Error: ' + e.toString());
+        ssccBarcode = '';
+        sscc = '';
       }
       
       var jsonData = {
@@ -390,11 +514,15 @@ define([
         arnNumber: ifData.arnNumber || '',
         asin: asin,
         poBarcode: ifData.poNumber || '',
-        sscc: sscc,
-        ssccBarcode: sscc.replace(/[^0-9]/g, ''),
+        sscc: sscc, // SSCC value from custrecord_sscc field (20 digits) - for display
+        ssccBarcode: ssccBarcode, // SSCC value from custrecord_sscc field (20 digits) - used directly for barcode
+        ssccDisplayText: '', // Will be set after barcode generation with formatted text: (00)108425590000000851
         barcode: targetPallet.palletId,
         qrCode: targetPallet.palletId
       };
+      
+      log.debug('SSCC Debug - collectIFPalletData', 'Final jsonData.ssccBarcode: "' + jsonData.ssccBarcode + '", length: ' + (jsonData.ssccBarcode ? jsonData.ssccBarcode.length : 0));
+      log.debug('SSCC Debug - collectIFPalletData', 'Final jsonData.sscc: "' + jsonData.sscc + '", length: ' + (jsonData.sscc ? jsonData.sscc.length : 0));
       
       return jsonData;
       
@@ -676,7 +804,6 @@ define([
       
       // Get carton count from pallet record's custrecord17 field
       var cartonCount = 0;
-      log.debug('Carton Count Debug', 'Starting carton count retrieval, palletId: ' + jsonData.palletId);
       if (jsonData.palletId) {
         try {
           var palletRecord = record.load({
@@ -684,28 +811,19 @@ define([
             id: jsonData.palletId,
             isDynamic: false
           });
-          log.debug('Carton Count Debug', 'Pallet record loaded successfully');
           var custrecord17Value = palletRecord.getValue('custrecord17') || '';
-          log.debug('Carton Count Debug', 'custrecord17 raw value: [' + custrecord17Value + ']');
           if (custrecord17Value) {
             try {
               var cartonData = JSON.parse(custrecord17Value);
-              log.debug('Carton Count Debug', 'Parsed JSON: ' + JSON.stringify(cartonData));
               cartonCount = cartonData.totalCartons || 0;
-              log.debug('Carton Count Debug', 'Extracted totalCartons: ' + cartonCount);
             } catch (e) {
-              log.debug('Carton Count Debug', 'Error parsing custrecord17 JSON: ' + e.message);
             }
           } else {
-            log.debug('Carton Count Debug', 'custrecord17 field is empty');
           }
         } catch (e) {
-          log.debug('Carton Count Debug', 'Error loading pallet record for carton count: ' + e.message);
         }
       } else {
-        log.debug('Carton Count Debug', 'No palletId provided in jsonData');
       }
-      log.debug('Carton Count Debug', 'Final cartonCount value: ' + cartonCount);
       
       // Get SKU/VPN information from custrecord17 JSON
       var skuDisplayText = '';
@@ -722,34 +840,23 @@ define([
             try {
               var cartonDataForSku = JSON.parse(custrecord17ValueForSku);
               cartonDataItems = cartonDataForSku.items || [];
-              log.debug('SKU Debug', 'Items in JSON: ' + cartonDataItems.length);
               
               if (cartonDataItems.length > 1) {
                 // More than one item = MIXED SKU
                 skuDisplayText = 'MIXED SKU';
-                log.debug('SKU Debug', 'Multiple items found, displaying MIXED SKU');
               } else if (cartonDataItems.length === 1) {
                 // Single item - get VPN from the item object (already in JSON)
                 var item = cartonDataItems[0];
                 skuDisplayText = item.vpn || '';
-                log.debug('SKU Debug', 'Single item found, item: ' + JSON.stringify(item));
-                log.debug('SKU Debug', 'VPN from JSON: [' + skuDisplayText + ']');
               } else if (cartonDataItems.length === 0) {
-                log.debug('SKU Debug', 'No items found in JSON array');
               }
             } catch (e) {
-              log.debug('SKU Debug', 'Error parsing custrecord17 JSON for SKU: ' + e.message);
             }
           }
         } catch (e) {
-          log.debug('SKU Debug', 'Error loading pallet record for SKU: ' + e.message);
         }
       }
-      log.debug('SKU Debug', 'Final skuDisplayText: [' + skuDisplayText + ']');
-      log.debug('SKU Debug', 'Adding skuDisplayText to recordData: ' + skuDisplayText);
-      
-      // Build recordData exactly as before
-      log.debug('renderPalletLabelPdf', 'Building recordData structure...');
+      // Build recordData structure
       var recordData = {
         id: jsonData.palletId || '',
         name: jsonData.palletName || '',
@@ -758,6 +865,11 @@ define([
         custrecord_items: jsonData.asin || 'ASIN_PLACEHOLDER',
         cartonCount: cartonCount,
         skuDisplayText: skuDisplayText,
+        sscc: jsonData.sscc || '',
+        ssccBarcode: jsonData.ssccBarcode || '',
+        ssccDisplayText: jsonData.ssccDisplayText || jsonData.sscc || '', // Formatted text: (00)108425590000000851
+        barcodeImageDataUri: jsonData.barcodeImageDataUri || '', // Barcode image as base64 data URI (for PDF embedding)
+        barcodeImageUrl: jsonData.barcodeImageUrl || '', // Barcode image file URL (for reference)
         custrecord_parent_if: {
           id: jsonData.ifId || '',
           tranid: jsonData.ifTranId || '',
@@ -781,33 +893,26 @@ define([
         }
       };
       
-      // DEBUG: Carton count in recordData
-      log.debug('Carton Count Debug', '=== FINAL recordData (being passed to template) ===');
-      log.debug('Carton Count Debug', 'cartonCount: [' + recordData.cartonCount + '] (type: ' + typeof recordData.cartonCount + ')');
-      log.debug('SKU Debug', 'skuDisplayText in recordData: [' + recordData.skuDisplayText + ']');
-      log.debug('SKU Debug', 'Full recordData keys: ' + Object.keys(recordData).join(', '));
+      // DEBUG: SSCC values in recordData
+      log.debug('SSCC Debug - renderPalletLabelPdf', 'recordData.ssccBarcode: "' + recordData.ssccBarcode + '", length: ' + (recordData.ssccBarcode ? recordData.ssccBarcode.length : 0));
+      log.debug('SSCC Debug - renderPalletLabelPdf', 'recordData.sscc: "' + recordData.sscc + '", length: ' + (recordData.sscc ? recordData.sscc.length : 0));
       
       // Add custom data source
-      log.debug('renderPalletLabelPdf', 'Adding custom data source to renderer...');
       var dataSourceData = { record: recordData };
       renderer.addCustomDataSource({
         format: render.DataSource.OBJECT,
         alias: 'JSON',
         data: dataSourceData
       });
-      log.debug('renderPalletLabelPdf', 'Custom data source added successfully');
       
       // Get template from separate library (bypasses NetSuite template validation)
       var templateString = templateLib.getPalletLabelTemplate();
-      log.debug('renderPalletLabelPdf', 'Template loaded, length: ' + (templateString ? templateString.length : 0) + ' chars');
       
       // Set the inline template
       renderer.templateContent = templateString;
       
       // Render and save
-      log.debug('renderPalletLabelPdf', 'Rendering PDF...');
       var pdf = renderer.renderAsPdf();
-      log.debug('renderPalletLabelPdf', 'PDF rendered, saving to folder: ' + pdfFolderId);
       pdf.folder = pdfFolderId;
       
       // File name: PalletLabel_<pallet_name>.pdf

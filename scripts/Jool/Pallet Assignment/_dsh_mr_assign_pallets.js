@@ -28,8 +28,9 @@ define([
   'N/search',
   'N/record',
   'N/log',
-  'N/runtime'
-], function (search, record, log, runtime) {
+  'N/runtime',
+  './_dsh_lib_pallet_sscc_generator'
+], function (search, record, log, runtime, ssccLib) {
   
   // Configuration constants
   var PALLET_RECORD_TYPE = 'customrecord_asn_pallet';
@@ -335,7 +336,6 @@ define([
         log.warning('reduce', 'IF ' + tranId + ' - Could not load IF record: ' + e.toString());
       }
       
-      var palletsCreated = 0;
       var packagesUpdated = 0;
       var contentsUpdated = 0;
       var errors = [];
@@ -347,47 +347,25 @@ define([
         var palletIndex = assignment.palletIndex + 1; // 1-based index
         
         try {
-          // Create pallet if not already created
+          // Pallet should already be created by library code
           if (!palletId) {
-            try {
-              var palletRecord = record.create({
-                type: PALLET_RECORD_TYPE
-              });
-              
-              var palletName = 'Pallet ' + palletIndex + ' - IF ' + tranId;
-              palletRecord.setValue({
-                fieldId: 'name',
-                value: palletName
-              });
-              
-              palletRecord.setValue({
-                fieldId: PALLET_IF_FIELD,
-                value: ifId
-              });
-              
-              if (entityId) {
-                palletRecord.setValue({
-                  fieldId: PALLET_ENTITY_FIELD,
-                  value: entityId
-                });
-              }
-              
-              palletId = palletRecord.save({
-                enableSourcing: false,
-                ignoreMandatoryFields: true
-              });
-              
-              palletsCreated++;
-              log.debug('reduce', 'IF ' + tranId + ' - Created pallet ' + palletId + ' (index ' + palletIndex + ')');
-              
-            } catch (createError) {
-              var errorMsg = 'IF ' + tranId + ' - Failed to create pallet ' + (assignment.palletIndex + 1) + ': ' + createError.toString();
-              log.error('reduce', errorMsg);
-              errors.push(errorMsg);
-              continue; // Skip this pallet assignment
-            }
-          } else {
-            log.debug('reduce', 'IF ' + tranId + ' - Using existing pallet ' + palletId);
+            var errorMsg = 'IF ' + tranId + ' - Pallet ID missing for pallet index ' + palletIndex + '. Pallet should have been created by library code.';
+            log.error('reduce', errorMsg);
+            errors.push(errorMsg);
+            continue; // Skip this pallet assignment
+          }
+          
+          log.debug('reduce', 'IF ' + tranId + ' - Processing pallet ' + palletId);
+          
+          // Generate and save SSCC for this pallet (before assigning packages)
+          try {
+            var sscc = ssccLib.generateAndSaveSSCC(palletId);
+            log.debug('reduce', 'IF ' + tranId + ' - Generated SSCC for pallet ' + palletId + ': ' + sscc);
+          } catch (ssccError) {
+            var ssccErrorMsg = 'IF ' + tranId + ' - Failed to generate SSCC for pallet ' + palletId + ': ' + ssccError.toString();
+            log.error('reduce', ssccErrorMsg);
+            errors.push(ssccErrorMsg);
+            // Continue processing - don't fail the whole pallet
           }
           
           // Create JSON for pallet with items (including VPN) and total cartons
@@ -487,7 +465,6 @@ define([
         log.error('reduce', 'IF ' + tranId + ' - Errors: ' + JSON.stringify(errors));
       } else {
         log.audit('reduce', 'IF ' + tranId + ' - Successfully processed: ' + 
-          palletsCreated + ' pallet(s) created, ' + 
           packagesUpdated + ' package(s) updated, ' + 
           contentsUpdated + ' content record(s) updated');
       }
