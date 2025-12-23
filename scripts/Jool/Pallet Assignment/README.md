@@ -10,7 +10,7 @@ This project calculates optimal pallet assignments for SPS packages based on Ite
 ## Architecture
 
 ### Phase 1: Calculation and Pallet Creation
-- **Library Script**: `_dsh_lib_calculate_and_assign_pallets.js`
+- **Library Script**: `_dsh_lib_create_and_link_pallets.js`
   - Gets IF location
   - Loads item records and gets UPP (units per pallet) based on location
   - Searches SPS packages and package content
@@ -33,7 +33,7 @@ This project calculates optimal pallet assignments for SPS packages based on Ite
 
 ### 1. Customize Configuration
 
-Edit `_dsh_lib_calculate_and_assign_pallets.js`:
+Edit `_dsh_lib_create_and_link_pallets.js`:
 
 ```javascript
 var PALLET_RECORD_TYPE = 'customrecord_pallet'; // Your pallet record type

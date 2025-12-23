@@ -9,7 +9,7 @@
 
 define([
   'N/log',
-  './_dsh_lib_calculate_and_assign_pallets'
+  './_dsh_lib_create_and_link_pallets'
 ], function (log, palletLib) {
   
   function onRequest(context) {

@@ -847,7 +847,8 @@ define([
               } else if (cartonDataItems.length === 1) {
                 // Single item - get VPN from the item object (already in JSON)
                 var item = cartonDataItems[0];
-                skuDisplayText = item.vpn || '';
+                var vpn = item.vpn || '';
+                skuDisplayText = 'Single ASIN - ' + vpn;
               } else if (cartonDataItems.length === 0) {
               }
             } catch (e) {

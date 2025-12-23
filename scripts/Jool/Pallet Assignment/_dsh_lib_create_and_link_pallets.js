@@ -1,15 +1,18 @@
 /**
  * @NApiVersion 2.1
  * @NModuleScope SameAccount
- * @description Library script to calculate optimal pallet assignments and create pallet records
+ * @description Library script to create and link pallets for Item Fulfillments
  * 
- * This script:
+ * This script orchestrates the full pallet assignment workflow:
  * 1. Gets IF location and item UPP (units per pallet) values
  * 2. Searches all SPS packages and their content
- * 3. Calculates optimal pallet assignments (minimize pallets, items can share)
- * 4. Creates pallet records
- * 5. Assigns packages to pallets
- * 6. Returns data structure for Map/Reduce to update packages and content
+ * 3. Uses pallet calculator library to determine optimal pallet assignments
+ * 4. Creates pallet records in NetSuite
+ * 5. Triggers Map/Reduce script to link packages to pallets
+ * 6. Returns data structure with pallet assignments and summary
+ * 
+ * Note: The actual pallet calculation logic is in _dsh_lib_pallet_calculator.js
+ * and can be swapped out without modifying this script.
  */
 
 define([
@@ -17,8 +20,9 @@ define([
   'N/record',
   'N/log',
   'N/runtime',
-  'N/task'
-], function (search, record, log, runtime, task) {
+  'N/task',
+  './_dsh_lib_pallet_calculator'
+], function (search, record, log, runtime, task, palletCalculator) {
   
   // ============================================================================
   // MAIN FUNCTION
@@ -183,8 +187,8 @@ define([
         return result;
       }
       
-      // Step 5: Calculate optimal pallet assignments
-      var palletAssignments = calculateOptimalPallets(packages, itemUPP, result);
+      // Step 5: Calculate optimal pallet assignments using calculator library
+      var palletAssignments = palletCalculator.calculatePalletAssignments(packages, itemUPP);
       
       // Step 6: Create pallet records
       var palletIds = [];
@@ -306,129 +310,6 @@ define([
   // ============================================================================
   // HELPER FUNCTIONS
   // ============================================================================
-  
-  /**
-   * Calculate optimal pallet assignments
-   * Items can share pallets, minimize total pallets
-   */
-  function calculateOptimalPallets(packages, itemUPP, result) {
-    // Step 1: Group packages and pre-calculate max cartons per pallet (CPP)
-    var packagesByItem = {};
-    var maxCppByItem = {};        // SKU → max cartons per pallet
-    var percentPerCarton = {};    // SKU → % of pallet one carton uses
-  
-    packages.forEach(function(pkg) {
-      if (!packagesByItem[pkg.itemId]) packagesByItem[pkg.itemId] = [];
-      packagesByItem[pkg.itemId].push(pkg);
-  
-      if (!maxCppByItem[pkg.itemId]) {
-        var upp = itemUPP[pkg.itemId] || 0;
-        var cartonQty = pkg.packageQty;
-        var maxCpp = upp > 0 ? Math.floor(upp / cartonQty) : 1;
-        maxCpp = Math.max(maxCpp, 1);
-  
-        maxCppByItem[pkg.itemId] = maxCpp;
-        percentPerCarton[pkg.itemId] = 100.0 / maxCpp;  // Key!
-      }
-    });
-  
-    // Step 2: Sort items by "difficulty" (total % needed) — hardest first
-    var sortedItemIds = Object.keys(packagesByItem).sort(function(a, b) {
-      var totalPercentA = packagesByItem[a].length * percentPerCarton[a];
-      var totalPercentB = packagesByItem[b].length * percentPerCarton[b];
-      return totalPercentB - totalPercentA;  // descending
-    });
-  
-    // Step 3: Pallets array
-    var pallets = [];  // each: { packages: [], usage: 0.0, itemCounts: {} }
-  
-    // Step 4: Place each carton using First-Fit with % capacity
-    sortedItemIds.forEach(function(itemId) {
-      var itemPackages = packagesByItem[itemId];
-      var percentPer = percentPerCarton[itemId];
-      var maxCpp = maxCppByItem[itemId];
-  
-      itemPackages.forEach(function(pkg) {
-        var placed = false;
-  
-        // Try to place on existing pallets (First-Fit)
-        for (var i = 0; i < pallets.length; i++) {
-          var pallet = pallets[i];
-          var currentCount = (pallet.itemCounts[itemId] || 0);
-  
-          // Check both: per-item limit AND total % capacity
-          if (currentCount < maxCpp && 
-              (pallet.usage + percentPer) <= 100.0) {   // This is the magic line
-  
-            pallet.packages.push(pkg);
-            pallet.itemCounts[itemId] = currentCount + 1;
-            pallet.usage += percentPer;
-            placed = true;
-            break;
-          }
-        }
-  
-        // No existing pallet has space → create new
-        if (!placed) {
-          pallets.push({
-            packages: [pkg],
-            itemCounts: { [itemId]: 1 },
-            usage: percentPer
-          });
-        }
-      });
-    });
-  
-    // Log pallet usage after assignment
-    for (var i = 0; i < pallets.length; i++) {
-      var pal = pallets[i];
-      log.audit('Pallet ' + (i + 1), 
-        'Usage: ' + pal.usage.toFixed(2) + '% | Packages: ' + pal.packages.length);
-    }
-    
-    // Log pallet usage after assignment
-    for (var i = 0; i < pallets.length; i++) {
-      var pal = pallets[i];
-      log.audit('Pallet ' + (i + 1), 
-        'Usage: ' + pal.usage.toFixed(2) + '% | Packages: ' + pal.packages.length);
-    }
-    
-    // Convert to your format (preserve usage for later logging)
-    return pallets.map(function(pal, idx) {
-      // Calculate item summary for this pallet
-      var itemsOnPallet = {};
-      var totalCartons = pal.packages.length;
-      
-      // Group packages by item and calculate quantities
-      pal.packages.forEach(function(pkg) {
-        var itemId = pkg.itemId;
-        if (!itemsOnPallet[itemId]) {
-          itemsOnPallet[itemId] = {
-            itemId: itemId,
-            quantity: 0,
-            cartons: 0
-          };
-        }
-        itemsOnPallet[itemId].quantity += pkg.packageQty;
-        itemsOnPallet[itemId].cartons += 1;
-      });
-      
-      // Convert to array
-      var itemsArray = [];
-      for (var itemId in itemsOnPallet) {
-        itemsArray.push(itemsOnPallet[itemId]);
-      }
-      
-      return {
-        palletId: null,
-        packageIds: pal.packages.map(function(p) { return p.packageId; }),
-        contentIds: pal.packages.map(function(p) { return p.contentId; }),
-        usage: pal.usage,  // Preserve usage percentage
-        items: itemsArray,  // Array of {itemId, quantity, cartons}
-        totalCartons: totalCartons  // Total carton count for this pallet
-      };
-    });
-  }
   
   /**
    * Calculate item summary for logging

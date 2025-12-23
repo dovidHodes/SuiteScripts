@@ -78,7 +78,7 @@
 2. **Verify MR Script IDs**
    - Go to the MR script in NetSuite
    - Note the actual Script ID and Deployment ID
-   - Update `_dsh_lib_calculate_and_assign_pallets.js` line 542-543:
+   - Update `_dsh_lib_create_and_link_pallets.js` line 542-543:
      ```javascript
      var mrScriptId = 'customscript_assign_packages_to_pallets'; // UPDATE THIS
      var mrDeployId = 'customdeploy1'; // UPDATE THIS
@@ -102,7 +102,7 @@
 If the MR script IDs are wrong, update them in the library:
 
 ```javascript
-// Line 542-543 in _dsh_lib_calculate_and_assign_pallets.js
+// Line 542-543 in _dsh_lib_create_and_link_pallets.js
 var mrScriptId = 'customscript_dsh_mr_assign_pallets'; // Your actual script ID
 var mrDeployId = 'customdeploy_dsh_mr_assign_pallets'; // Your actual deployment ID
 ```

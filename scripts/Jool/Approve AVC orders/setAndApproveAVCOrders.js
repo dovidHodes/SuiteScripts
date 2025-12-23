@@ -352,10 +352,7 @@ define([
                 // Handle items with no availability
                 if (item.noWarehouseHasEnough) {
                     needsApproval = true;
-                    for (var w = 0; w < warehouseMap.length; w++) {
-                        lineNote += 'Not enough qty at ' + warehouseMap[w].name + '. ';
-                    }
-                    lineNote += 'No qty at all locations. ';
+                    lineNote += 'No qty avail at both locations. ';
                 } else {
                     // Get assigned location from map
                     var assignment = assignedLocationMap[item.lineIndex];

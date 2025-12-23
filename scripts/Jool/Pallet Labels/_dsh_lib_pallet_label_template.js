@@ -311,18 +311,18 @@ define([], function () {
             '                <table style="width: 100%; border-collapse: collapse; padding: 5px;">\n' +
             '                    <tr>\n' +
             '                        <td style="padding: 5px; text-align: center; vertical-align: top;">\n' +
-            '                            <p style="text-align: center; font-size: 8pt; font-weight: normal; color: #000000; margin: 0 0 5px 0; padding: 0;">Pallet SSCC</p>\n' +
-            '                            <div class="carrier-info" style="display: flex; align-items: center; justify-content: center; padding: 0;">\n' +
+            '                            <p style="text-align: center; font-size: 8pt; font-weight: normal; color: #000000; margin: 0 0 5px 0; padding-left: 130px;">Pallet SSCC</p>\n' +
+            '                            <div class="carrier-info" style="display: flex; align-items: center; justify-content: flex-start; padding: 0;">\n' +
             '                                <div style="text-align: center; overflow: hidden;">\n' +
             '                                    <!-- SSCC barcode image from QuickChart API - using base64 data URI for PDF embedding -->\n' +
             '                                    <#if record.barcodeImageDataUri?has_content>\n' +
-            '                                        <img src="${record.barcodeImageDataUri}" alt="SSCC Barcode" style="max-width: 100%; height: auto; display: block; margin: 0 auto;" />\n' +
+            '                                        <img src="${record.barcodeImageDataUri}" alt="SSCC Barcode" style="width: 300px; height: 50px; display: block; margin-left: 30px;" />\n' +
             '                                    </#if>\n' +
             '                                    <!-- Human-readable SSCC text below barcode - same format as barcode: (00)108425590000000851 -->\n' +
             '                                    <#if record.ssccDisplayText?has_content>\n' +
-            '                                        <p class="sscc-text" style="text-align: center; font-size: 9pt; font-weight: normal; font-family: sans-serif; color: #000000; margin: 5px 0 0 0;">${record.ssccDisplayText?html}</p>\n' +
+            '                                        <p class="sscc-text" style="text-align: center; font-size: 9pt; font-weight: normal; font-family: sans-serif; color: #000000; margin: 5px 0 0 0; padding-left: 90px;">${record.ssccDisplayText?html}</p>\n' +
             '                                    <#elseif record.sscc?has_content>\n' +
-            '                                        <p class="sscc-text" style="text-align: center; font-size: 9pt; font-weight: normal; font-family: sans-serif; color: #000000; margin: 5px 0 0 0;">${record.sscc?html}</p>\n' +
+            '                                        <p class="sscc-text" style="text-align: center; font-size: 9pt; font-weight: normal; font-family: sans-serif; color: #000000; margin: 5px 0 0 0; padding-left: 90px;">${record.sscc?html}</p>\n' +
             '                                    </#if>\n' +
             '                                </div>\n' +
             '                            </div>\n' +
