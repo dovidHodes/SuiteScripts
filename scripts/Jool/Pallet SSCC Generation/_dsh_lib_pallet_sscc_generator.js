@@ -40,7 +40,6 @@ define([
             custrecord_sscc: sscc
           }
         });
-        log.audit('SSCC Saved', 'SSCC ' + sscc + ' saved to pallet ' + palletId);
       } catch (saveError) {
         log.error('Error saving SSCC to pallet', 'Pallet ID: ' + palletId + ', Error: ' + saveError.toString());
         throw saveError;
@@ -151,8 +150,6 @@ define([
           notifyOff: true
         });
       }
-      
-      log.debug('SSCC Generated', 'Pallet ID: ' + palletId + ', SSCC: ' + sscc);
       
       return sscc;
     } catch (err) {

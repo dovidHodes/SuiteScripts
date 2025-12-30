@@ -6,9 +6,7 @@
  * Suitelet to generate pallet label PDF for a pallet record.
  * Called with pallet ID as parameter.
  * Uses library script for shared logic.
- * 
- * Usage:
- * GET /app/site/hosting/scriptlet.nl?script=customscript_dsh_sl_pallet_label&deploy=customdeploy_dsh_sl_pallet_label&palletid=123
+ 
  */
 
 define([
@@ -50,9 +48,7 @@ define([
         var templateId = templateIdParam || 'CUSTTMPL_DSH_PALLET_LABEL';
         
         // Call library function
-        var result = palletLabelLib.generatePalletLabel(palletId, null, pdfFolderId, templateId, {
-          attachToRecord: true
-        });
+        var result = palletLabelLib.generatePalletLabel(palletId, pdfFolderId, templateId);
         
         // Check if redirect parameter is set
         var shouldRedirect = request.parameters.redirect === 'T' || request.parameters.redirect === 'true';

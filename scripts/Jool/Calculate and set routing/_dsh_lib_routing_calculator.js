@@ -13,7 +13,6 @@ define([
   
   /**
    * Calculates and applies all routing fields to an Item Fulfillment
-   * This is the ONLY function you need to call - it handles everything:
    * - Loads the IF record
    * - Gets location from IF
    * - Calculates routing fields (cartons, volume, weight, pallets with sharing)
@@ -102,6 +101,8 @@ define([
       var itemData = [];
       var hasMissingUPP = false; // Track if any items have missing units per pallet
       var missingUPPItems = []; // Track which items have missing UPP for email notification
+      var hasMissingCartonWeight = false; // Track if any items have missing carton weight
+      var missingCartonWeightItems = []; // Track which items have missing carton weight
       
       log.debug('Routing Calculator - Pallet Debug', '=== STARTING PALLET CALCULATION ===');
       log.debug('Routing Calculator - Pallet Debug', 'Total lines in IF: ' + lineCount + ' (processing all lines with quantity > 0)');
@@ -141,9 +142,27 @@ define([
           totalVolume += itemVolume;
           
           // Get weight per carton
-          var weightPerCarton = itemRecord.getValue('custitemweight_carton_1') || 0;
+          var weightPerCartonFieldValue = itemRecord.getValue('custitemweight_carton_1');
+          var weightPerCarton = weightPerCartonFieldValue || 0;
           var itemWeight = weightPerCarton * Math.max(1, itemCartons);
           totalWeight += itemWeight;
+          
+          // Check if carton weight is missing/null/empty
+          if (!weightPerCartonFieldValue || weightPerCartonFieldValue === 0 || weightPerCartonFieldValue === '') {
+            hasMissingCartonWeight = true;
+            var locationNameForWeight = locationRecord.getValue('name') || locationId;
+            missingCartonWeightItems.push({
+              itemName: itemName,
+              itemId: itemId,
+              locationId: locationId,
+              locationName: locationNameForWeight,
+              quantity: itemQuantity
+            });
+            log.audit('Routing Calculator - Missing Carton Weight', 
+                        'Item ' + itemName + ' (ID: ' + itemId + ') has missing/null/empty carton weight field. ' +
+                        'Location: ' + locationId + ' (' + locationNameForWeight + '), Defaulting to 0 weight. ' +
+                        'Routing status will be set to 4 (error requesting).');
+          }
           
           // Get units per pallet based on location
           var unitsPerPallet = 0;
@@ -377,8 +396,8 @@ define([
       }
       
       // Set routing status based on conditions
-      if (pickupDateSet && !hasMissingUPP) {
-        // Set routing status to 1 if pickup date was set AND no items have missing UPP
+      if (pickupDateSet && !hasMissingUPP && !hasMissingCartonWeight) {
+        // Set routing status to 1 if pickup date was set AND no items have missing UPP AND no items have missing carton weight
         ifRecord.setValue({
           fieldId: 'custbody_routing_status',
           value: 1
@@ -391,22 +410,46 @@ define([
           value: 4
         });
         log.debug('Routing Calculator', 'Set routing status to 4 (pickup date could not be set)');
-      } else if (hasMissingUPP) {
-        // Set error message in field instead of sending email
-        var uppErrorMsg = 'Missing Units Per Pallet (UPP) fields. Location: ' + locationName + '. Items: ';
-        var itemNames = [];
-        for (var u = 0; u < missingUPPItems.length; u++) {
-          itemNames.push(missingUPPItems[u].itemName + ' (ID: ' + missingUPPItems[u].itemId + ')');
+      } else if (hasMissingUPP || hasMissingCartonWeight) {
+        // Set routing status to 4 when UPP or carton weight is missing
+        ifRecord.setValue({
+          fieldId: 'custbody_routing_status',
+          value: 4
+        });
+        
+        // Build combined error message
+        var errorMessages = [];
+        
+        if (hasMissingUPP) {
+          var uppErrorMsg = 'Missing Units Per Pallet (UPP) fields. Location: ' + locationName + '. Items: ';
+          var uppItemNames = [];
+          for (var u = 0; u < missingUPPItems.length; u++) {
+            uppItemNames.push(missingUPPItems[u].itemName + ' (ID: ' + missingUPPItems[u].itemId + ')');
+          }
+          uppErrorMsg += uppItemNames.join(', ');
+          errorMessages.push(uppErrorMsg);
         }
-        uppErrorMsg += itemNames.join(', ');
+        
+        if (hasMissingCartonWeight) {
+          var weightErrorMsg = 'Missing carton weight fields. Location: ' + locationName + '. Items: ';
+          var weightItemNames = [];
+          for (var w = 0; w < missingCartonWeightItems.length; w++) {
+            weightItemNames.push(missingCartonWeightItems[w].itemName + ' (ID: ' + missingCartonWeightItems[w].itemId + ')');
+          }
+          weightErrorMsg += weightItemNames.join(', ');
+          errorMessages.push(weightErrorMsg);
+        }
+        
+        var combinedErrorMsg = errorMessages.join(' | ');
         ifRecord.setValue({
           fieldId: 'custbody_routing_request_issue',
-          value: uppErrorMsg
+          value: combinedErrorMsg
         });
-        log.debug('Routing Calculator', 'Missing UPP detected. Set error message in custbody_routing_request_issue field.');
+        
+        log.debug('Routing Calculator', 'Missing UPP or carton weight detected. Set routing status to 4 and error message in custbody_routing_request_issue field.');
         log.audit('Routing Calculator', 
-                    'NOT setting routing status to 1 because one or more items have missing/null/empty units per pallet field. ' +
-                    'Please update item UPP fields and recalculate routing.');
+                    'Set routing status to 4 (error requesting) because one or more items have missing/null/empty units per pallet or carton weight fields. ' +
+                    'Please update item fields and recalculate routing.');
       } else if (!pickupDateSet) {
         log.debug('Routing Calculator', 'NOT setting routing status to 1 because pickup date was not set');
       }

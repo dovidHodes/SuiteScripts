@@ -1,15 +1,17 @@
 /**
  * @NApiVersion 2.1
  * @NModuleScope SameAccount
- * @description Library script to create and link pallets for Item Fulfillments
+ * @description Library script to create pallets for Item Fulfillments
  * 
- * This script orchestrates the full pallet assignment workflow:
+ * This script is a "pure" library function that:
  * 1. Gets IF location and item UPP (units per pallet) values
  * 2. Searches all SPS packages and their content
  * 3. Uses pallet calculator library to determine optimal pallet assignments
  * 4. Creates pallet records in NetSuite
- * 5. Triggers Map/Reduce script to link packages to pallets
- * 6. Returns data structure with pallet assignments and summary
+ * 5. Returns data structure with pallet assignments and summary
+ * 
+ * This library returns payload data only - it does NOT trigger Map/Reduce scripts.
+ * Callers (Suitelet or planner MR) are responsible for submitting the package assigner MR.
  * 
  * Note: The actual pallet calculation logic is in _dsh_lib_pallet_calculator.js
  * and can be swapped out without modifying this script.
@@ -20,9 +22,8 @@ define([
   'N/record',
   'N/log',
   'N/runtime',
-  'N/task',
   './_dsh_lib_pallet_calculator'
-], function (search, record, log, runtime, task, palletCalculator) {
+], function (search, record, log, runtime, palletCalculator) {
   
   // ============================================================================
   // MAIN FUNCTION
@@ -33,19 +34,25 @@ define([
    * @param {string} ifId - Item Fulfillment internal ID
    * @returns {Object} Result object with pallet assignments
    */
-  function calculateAndAssignPallets(ifId) {
+  function calculateAndCreatePallets(ifId) {
+    // Track governance usage
+    var usageStart = runtime.getCurrentScript().getRemainingUsage();
+    
     var result = {
       success: false,
       ifId: ifId,
+      ifTranId: '',  // Will be set after loading IF
       palletsCreated: 0,
+      totalPallets: 0,  // Same as palletsCreated, for clarity
       palletAssignments: [], // Array of {palletId, packageIds: [], contentIds: [], items: [{itemId, quantity, cartons}], totalCartons: number}
+      itemVpnMap: {},  // Map of itemId to VPN
       itemSummary: {}, // Summary by item
       errors: [],
       warnings: []
     };
     
     try {
-      log.audit('calculateAndAssignPallets', 'Starting for IF: ' + ifId);
+      log.audit('calculateAndCreatePallets', 'Starting for IF: ' + ifId);
       
       // Step 1: Load IF and get location
       var ifRecord = record.load({
@@ -57,6 +64,9 @@ define([
       var ifTranId = ifRecord.getValue('tranid') || ifId;
       var locationId = ifRecord.getValue('custbody_ship_from_location');
       var entityId = ifRecord.getValue('entity');
+      
+      // Set ifTranId in result
+      result.ifTranId = ifTranId;
       
       if (!locationId) {
         throw new Error('No ship from location found on IF');
@@ -108,31 +118,48 @@ define([
         }
         
         // Load item record and get UPP based on location
-        var itemRecord = record.load({
-          type: 'inventoryitem',
-          id: itemId,
-          isDynamic: false
-        });
-        
-        // Get item name
-        var itemName = itemRecord.getValue('itemid') || itemRecord.getValue('displayname') || itemId;
-        itemNames[itemId] = itemName;
-        
-        // Get UPP using the field determined once per IF
-        var upp = itemRecord.getValue(uppFieldId) || 0;
-        
-        if (upp > 0) {
-          itemUPP[itemId] = upp;
-        } else {
-          var errorMsg = 'Item ' + itemId + ' (' + itemName + ') has no UPP (units per pallet) for location ' + locationId;
-          log.error('No UPP', errorMsg);
+        try {
+          var itemRecord = record.load({
+            type: 'inventoryitem',
+            id: itemId,
+            isDynamic: false
+          });
+          
+          if (!itemRecord) {
+            var errorMsg = 'Failed to load item record: ' + itemId;
+            log.error('Item Load Error', errorMsg);
+            result.errors.push(errorMsg);
+            continue;
+          }
+          
+          // Get item name
+          var itemName = itemRecord.getValue('itemid') || itemRecord.getValue('displayname') || itemId;
+          itemNames[itemId] = itemName;
+          
+          // Get UPP using the field determined once per IF
+          var upp = itemRecord.getValue(uppFieldId) || 0;
+          
+          if (upp > 0) {
+            itemUPP[itemId] = upp;
+          } else {
+            var errorMsg = 'Item ' + itemId + ' (' + itemName + ') has no UPP (units per pallet) for location ' + locationId;
+            log.error('No UPP', errorMsg);
+            result.errors.push(errorMsg);
+          }
+        } catch (itemLoadError) {
+          var errorMsg = 'Error loading item ' + itemId + ': ' + itemLoadError.toString();
+          log.error('Item Load Error', errorMsg);
           result.errors.push(errorMsg);
         }
       }
       
       log.debug('VPN Map Built', 'Built VPN map with ' + Object.keys(itemVpnMap).length + ' item(s)');
       
+      // Store VPN map in result
+      result.itemVpnMap = itemVpnMap;
+      
       // Step 4: Search all SPS packages for IF
+      log.debug('Package Search', 'About to create package search for IF: ' + ifId);
       var packages = [];
       var packageSearch = search.create({
         type: 'customrecord_sps_package',
@@ -145,38 +172,104 @@ define([
         ]
       });
       
-      packageSearch.run().each(function (packageResult) {
+      log.debug('Package Search', 'Package search created, about to run');
+      var packageSearchResult = packageSearch.run();
+      log.debug('Package Search', 'Package search run completed, about to iterate');
+      
+      // First, collect all package IDs
+      var packageIds = [];
+      var packageData = {}; // {packageId: {qty: number}}
+      
+      packageSearchResult.each(function (packageResult) {
         var packageId = packageResult.id;
         var packageQty = packageResult.getValue('custrecord_sps_package_qty') || 0;
         
-        // Get first package content record for this package
-        var contentSearch = search.create({
-          type: 'customrecord_sps_content',
-          filters: [
-            ['custrecord_sps_content_package', 'anyof', packageId]
-          ],
-          columns: [
-            search.createColumn({ name: 'internalid' }),
-            search.createColumn({ name: 'custrecord_sps_content_item' })
-          ]
-        });
-        
-        var contentResult = contentSearch.run().getRange({ start: 0, end: 1 });
-        
-        if (contentResult.length > 0) {
-          var contentId = contentResult[0].id;
-          var itemId = contentResult[0].getValue('custrecord_sps_content_item');
-          
-          packages.push({
-            packageId: packageId,
-            packageQty: parseFloat(packageQty) || 0,
-            contentId: contentId,
-            itemId: itemId
-          });
+        if (packageId) {
+          packageIds.push(packageId);
+          packageData[packageId] = {
+            qty: parseFloat(packageQty) || 0
+          };
         }
         
         return true;
       });
+      
+      log.debug('Package Search', 'Found ' + packageIds.length + ' packages, about to bulk search content');
+      
+      // Bulk search for all content records at once (much more efficient)
+      // Use runPaged to handle more than 4000 results
+      var contentMap = {}; // {packageId: {contentId: string, itemId: string}}
+      
+      if (packageIds.length > 0) {
+        var contentSearch = search.create({
+          type: 'customrecord_sps_content',
+          filters: [
+            ['custrecord_sps_content_package', 'anyof', packageIds]
+          ],
+          columns: [
+            search.createColumn({ name: 'internalid' }),
+            search.createColumn({ name: 'custrecord_sps_content_package' }),
+            search.createColumn({ name: 'custrecord_sps_content_item' })
+          ]
+        });
+        
+        log.debug('Content Search', 'Bulk content search created for ' + packageIds.length + ' packages');
+        
+        // Use runPaged to handle large result sets (>4000)
+        var pagedData = contentSearch.runPaged({ pageSize: 1000 });
+        var pageRanges = pagedData.pageRanges;
+        var totalPages = pageRanges ? pageRanges.length : 0;
+        log.debug('Content Search', 'Content search has ' + totalPages + ' page(s)');
+        
+        var totalContentCount = 0; // Count all content records (not just first per package)
+        
+        // Process each page
+        for (var pageNum = 0; pageNum < totalPages; pageNum++) {
+          var page = pagedData.fetch({ index: pageNum });
+          
+          // Count all content records on this page
+          totalContentCount += page.data.length;
+          
+          page.data.forEach(function (contentResult) {
+            var contentId = contentResult.id;
+            var packageId = contentResult.getValue('custrecord_sps_content_package');
+            var itemId = contentResult.getValue('custrecord_sps_content_item');
+            
+            // Store first content record found for each package
+            if (packageId && !contentMap[packageId]) {
+              contentMap[packageId] = {
+                contentId: contentId,
+                itemId: itemId
+              };
+            }
+          });
+          
+          // Early exit: if we've found content for all packages, no need to continue
+          if (Object.keys(contentMap).length >= packageIds.length) {
+            log.debug('Content Search', 'Found content for all packages, stopping at page ' + (pageNum + 1) + ' (processed ' + totalContentCount + ' content records so far)');
+            break;
+          }
+        }
+        
+        log.debug('Content Search', 'Bulk content search completed - Found content for ' + Object.keys(contentMap).length + ' of ' + packageIds.length + ' packages, Total content records: ' + totalContentCount);
+      }
+      
+      // Build packages array from collected data
+      for (var i = 0; i < packageIds.length; i++) {
+        var packageId = packageIds[i];
+        var content = contentMap[packageId];
+        
+        if (content && content.contentId && content.itemId) {
+          packages.push({
+            packageId: packageId,
+            packageQty: packageData[packageId].qty,
+            contentId: content.contentId,
+            itemId: content.itemId
+          });
+        }
+      }
+      
+      log.debug('Package Search', 'Package processing complete - Total packages: ' + packageIds.length + ', Packages with content: ' + packages.length + ', Total content records: ' + totalContentCount);
       
       log.audit('Packages Found', 'Found ' + packages.length + ' packages');
       
@@ -198,12 +291,6 @@ define([
         try {
           var palletRecord = record.create({
             type: 'customrecord_asn_pallet'
-          });
-          
-          var palletName = 'Pallet ' + (p + 1) + ' - IF ' + ifTranId;
-          palletRecord.setValue({
-            fieldId: 'name',
-            value: palletName
           });
           
           palletRecord.setValue({
@@ -230,7 +317,7 @@ define([
             value: totalPallets
           });
           
-          // Set customer field LAST to prevent sourcing from clearing it
+          // Set customer 
           if (entityId) {
             palletRecord.setValue({
               fieldId: 'custrecord8',
@@ -262,6 +349,7 @@ define([
       }
       
       result.palletsCreated = palletIds.length;
+      result.totalPallets = palletIds.length;  // Set totalPallets
       result.palletAssignments = palletAssignments;
       
       // Step 7: Calculate and log summary
@@ -273,18 +361,6 @@ define([
       
       // Log totals
       logTotals(palletAssignments, packages, itemUPP, itemNames);
-      
-      // Step 8: Trigger Map/Reduce script for every 100 pallets
-      if (palletAssignments.length > 0) {
-        try {
-          triggerMapReduceForAssignments(ifId, ifTranId, palletAssignments, itemVpnMap, result);
-        } catch (mrError) {
-          var errorMsg = 'Failed to trigger Map/Reduce script: ' + mrError.toString();
-          log.error('Map/Reduce Trigger Error', errorMsg);
-          result.errors.push(errorMsg);
-          // Don't fail the whole process if MR trigger fails
-        }
-      }
       
       // Set success based on whether we have errors and created pallets
       if (result.errors.length > 0) {
@@ -300,9 +376,14 @@ define([
       }
       
     } catch (error) {
-      log.error('calculateAndAssignPallets Error', error);
+      log.error('calculateAndCreatePallets Error', error);
       result.errors.push(error.toString());
     }
+    
+    // Calculate and log total governance usage
+    var usageEnd = runtime.getCurrentScript().getRemainingUsage();
+    var totalUsage = usageStart - usageEnd;
+    log.debug('Governance Usage', 'Total governance used: ' + totalUsage + ' units (Started with: ' + usageStart + ', Remaining: ' + usageEnd + ')');
     
     return result;
   }
@@ -404,97 +485,6 @@ define([
   }
   
   /**
-   * Trigger Map/Reduce script for pallet assignments
-   * Batches assignments into groups of 100 pallets
-   * @param {string} ifId - Item Fulfillment ID
-   * @param {string} ifTranId - Item Fulfillment transaction ID
-   * @param {Array} palletAssignments - Array of pallet assignment objects
-   * @param {Object} itemVpnMap - Map of itemId to VPN
-   * @param {Object} result - Result object to add MR task IDs to
-   */
-  function triggerMapReduceForAssignments(ifId, ifTranId, palletAssignments, itemVpnMap, result) {
-    var BATCH_SIZE = 100;
-    var mrScriptId = 'customscript_assign_packages_to_pallets';
-    var mrDeployId = 'customdeploy1';
-    
-    log.audit('triggerMapReduceForAssignments', 'IF ' + ifTranId + ' - Triggering MR for ' + palletAssignments.length + ' pallet assignment(s)');
-    
-    // Batch assignments into groups of 100
-    var batches = [];
-    for (var i = 0; i < palletAssignments.length; i += BATCH_SIZE) {
-      var batch = palletAssignments.slice(i, i + BATCH_SIZE);
-      batches.push(batch);
-    }
-    
-    log.debug('triggerMapReduceForAssignments', 'IF ' + ifTranId + ' - Created ' + batches.length + ' batch(es) of up to ' + BATCH_SIZE + ' pallets each');
-    
-    var mrTaskIds = [];
-    var scheduledCount = 0;
-    var errorCount = 0;
-    
-    // Submit MR task for each batch
-    for (var b = 0; b < batches.length; b++) {
-      var batch = batches[b];
-      var batchNumber = b + 1;
-      
-      try {
-        // Prepare assignment data for this batch
-        var assignmentData = {
-          ifId: ifId,
-          ifTranId: ifTranId,
-          palletAssignments: batch,
-          batchNumber: batchNumber,
-          totalBatches: batches.length,
-          itemVpnMap: itemVpnMap  // Pass the VPN map to MR script
-        };
-        
-        var jsonParam = JSON.stringify(assignmentData);
-        
-        log.debug('triggerMapReduceForAssignments', 'IF ' + ifTranId + ' - Submitting MR batch ' + batchNumber + ' of ' + batches.length + ' with ' + batch.length + ' pallet(s)');
-        
-        var mrTask = task.create({
-          taskType: task.TaskType.MAP_REDUCE,
-          scriptId: mrScriptId,
-          deploymentId: mrDeployId,
-          params: {
-            custscriptjson: jsonParam
-          }
-        });
-        
-        var taskId = mrTask.submit();
-        mrTaskIds.push(taskId);
-        scheduledCount++;
-        
-        log.audit('triggerMapReduceForAssignments', 'IF ' + ifTranId + ' - MR batch ' + batchNumber + ' submitted. Task ID: ' + taskId);
-        
-      } catch (submitError) {
-        errorCount++;
-        var errorName = submitError.name || '';
-        
-        if (errorName === 'MAP_REDUCE_ALREADY_RUNNING') {
-          log.audit('triggerMapReduceForAssignments', 'IF ' + ifTranId + ' - MR deployment ' + mrDeployId + ' is busy for batch ' + batchNumber + '. Will retry on next run.');
-        } else {
-          var errorMsg = 'IF ' + ifTranId + ' - Failed to submit MR batch ' + batchNumber + ': ' + submitError.toString();
-          log.error('triggerMapReduceForAssignments', errorMsg);
-          result.errors.push(errorMsg);
-        }
-      }
-    }
-    
-    // Add MR task IDs to result
-    if (!result.mrTaskIds) {
-      result.mrTaskIds = [];
-    }
-    result.mrTaskIds = result.mrTaskIds.concat(mrTaskIds);
-    
-    log.audit('triggerMapReduceForAssignments', 'IF ' + ifTranId + ' - MR scheduling complete: ' + scheduledCount + ' scheduled, ' + errorCount + ' error(s)');
-    
-    if (errorCount > 0) {
-      result.warnings.push('Some Map/Reduce batches failed to schedule. ' + scheduledCount + ' of ' + batches.length + ' batches scheduled successfully.');
-    }
-  }
-  
-  /**
    * Log totals
    */
   function logTotals(palletAssignments, packages, itemUPP, itemNames) {
@@ -539,7 +529,7 @@ define([
   // ============================================================================
   
   return {
-    calculateAndAssignPallets: calculateAndAssignPallets
+    calculateAndCreatePallets: calculateAndCreatePallets
   };
   
 });

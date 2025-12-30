@@ -2,35 +2,23 @@
  * @NApiVersion 2.1
  * @NScriptType MapReduceScript
  * @NModuleScope SameAccount
- * @description Map/Reduce script to create pallets and assign packages/package contents to pallets
+ * @description Map/Reduce script to assign packages/package contents to pallets
  * 
  * This script:
- * 1. Takes pallet assignment data from the library script
- * 2. Creates pallet records for each batch
+ * 1. Takes pallet assignment data from library script (via Suitelet or MR)
+ * 2. Supports single-IF or multi-IF payloads 
  * 3. Updates packages with pallet IDs
  * 4. Updates package content records with pallet IDs
- * 
- * REQUIRED SCRIPT PARAMETER:
- * IMPORTANT: Even though parameters are passed at runtime via task.create(),
- * the parameter FIELD must exist in the deployment for it to be accessible.
- * 
- * In the script deployment (customdeploy1), create a script parameter with:
- * - Field ID: 'json' 
- * - Type: Free-Form Text
- * - Default Value: (leave blank - will be set at runtime)
- * - The full parameter name will be: custscriptjson
- * 
- * Without this parameter field in the deployment, runtime parameters passed
- * via task.create() will not be accessible in the MR script.
+ * 5. sets the package JSON field on the pallet for Jitterbit ASN use
+
  */
 
 define([
-  'N/search',
   'N/record',
   'N/log',
   'N/runtime',
   './_dsh_lib_pallet_sscc_generator'
-], function (search, record, log, runtime, ssccLib) {
+], function (record, log, runtime, ssccLib) {
   
   // Configuration constants
   var PALLET_RECORD_TYPE = 'customrecord_asn_pallet';
@@ -40,149 +28,79 @@ define([
   var PACKAGE_CONTENT_PALLET_FIELD = 'custrecord_content_asn_pallet';
   
   /**
-   * Gets input data - creates a search for the IF record
-   * The actual assignment data is read from script parameter in map function
+   * Gets input data - returns pallet assignments array directly
    * @param {Object} inputContext
-   * @returns {Object} Search object with IF ID
+   * @returns {Array} Array of pallet assignments
    */
   function getInputData(inputContext) {
     try {
-      // When called via task.create(), parameters are accessed through inputContext.executionContext
+      // Read parameter directly - hardcoded to 'custscriptjson'
       var jsonParam = null;
-      var paramNames = [
-        'custscriptjson',
-        'custscript_assign_packages_to_pallets_json',
-        'custscript_assign_packages_to_pallets_pallet_assignment_json',
-        'custscript_pallet_assignment_json'
-      ];
-      
-      // First try executionContext (for task.create() calls)
-      if (inputContext && inputContext.executionContext) {
-        try {
-          var execContext = inputContext.executionContext;
-          log.debug('getInputData', 'executionContext exists, trying to get parameters');
-          
-          // Try to get all parameters to see what's available
-          try {
-            // Try to get all parameters - this will help us see what's actually passed
-            var allExecParams = {};
-            for (var k = 0; k < paramNames.length; k++) {
-              try {
-                var testParam = execContext.getParameter({ name: paramNames[k] });
-                if (testParam) {
-                  allExecParams[paramNames[k]] = testParam.substring(0, 100) + '...'; // First 100 chars for debugging
-                }
-              } catch (e) {
-                // Parameter doesn't exist
-              }
-            }
-            log.debug('getInputData', 'Available parameters in executionContext: ' + JSON.stringify(allExecParams));
-          } catch (e) {
-            log.debug('getInputData', 'Could not enumerate executionContext parameters: ' + e.toString());
-          }
-          
-          // Now try to get the actual parameter
-          for (var j = 0; j < paramNames.length && !jsonParam; j++) {
-            try {
-              jsonParam = execContext.getParameter({ name: paramNames[j] });
-              if (jsonParam) {
-                log.debug('getInputData', 'Found parameter in executionContext with name: ' + paramNames[j]);
-                log.debug('getInputData', 'Parameter value (first 200 chars): ' + jsonParam.substring(0, 200));
-                break;
-              }
-            } catch (e) {
-              log.debug('getInputData', 'Parameter ' + paramNames[j] + ' not found in executionContext: ' + e.toString());
-            }
-          }
-        } catch (e) {
-          log.error('getInputData', 'Error accessing executionContext: ' + e.toString());
-        }
-      } else {
-        log.debug('getInputData', 'No executionContext available in inputContext');
-      }
-      
-      // Fallback: try runtime.getCurrentScript() (for manual/deployment parameter calls)
-      if (!jsonParam) {
-        try {
-          var scriptObj = runtime.getCurrentScript();
-          var scriptId = scriptObj.id;
-          log.debug('getInputData', 'Script ID: ' + scriptId);
-          
-          for (var i = 0; i < paramNames.length && !jsonParam; i++) {
-            try {
-              jsonParam = scriptObj.getParameter({ name: paramNames[i] });
-              if (jsonParam) {
-                log.debug('getInputData', 'Found parameter with name: ' + paramNames[i]);
-                break;
-              }
-            } catch (e) {
-              log.debug('getInputData', 'Parameter ' + paramNames[i] + ' not found: ' + e.toString());
-            }
-          }
-          
-          // Try to get all parameters for debugging (but need to specify name)
-          if (!jsonParam) {
-            log.debug('getInputData', 'Trying to enumerate all parameters...');
-            // Try common parameter field IDs without the custscript_ prefix
-            var fieldIds = ['json', 'pallet_assignment_json', 'assignment_json'];
-            for (var f = 0; f < fieldIds.length; f++) {
-              try {
-                var testParamName = 'custscript_' + scriptId.replace('customscript_', '') + '_' + fieldIds[f];
-                log.debug('getInputData', 'Trying parameter name: ' + testParamName);
-                var testParam = scriptObj.getParameter({ name: testParamName });
-                if (testParam) {
-                  jsonParam = testParam;
-                  log.debug('getInputData', 'Found parameter with constructed name: ' + testParamName);
-                  break;
-                }
-              } catch (e) {
-                // Continue
-              }
-            }
-          }
-        } catch (e) {
-          log.debug('getInputData', 'Could not get script object: ' + e.toString());
-        }
+      try {
+        var scriptObj = runtime.getCurrentScript();
+        jsonParam = scriptObj.getParameter({ name: 'custscriptjson' });
+      } catch (e) {
+        log.error('getInputData', 'Error reading custscriptjson parameter: ' + e.toString());
+        return [];
       }
       
       if (!jsonParam) {
-        log.error('getInputData', 'No pallet assignment JSON parameter found. Tried parameter names: ' + paramNames.join(', '));
-        // Return empty search to prevent processing (using non-existent ID)
-        return search.create({
-          type: 'itemfulfillment',
-          filters: [['internalid', 'is', '-1']]
-        });
+        log.error('getInputData', 'No pallet assignment JSON parameter found (custscriptjson)');
+        return [];
       }
       
-      var assignmentData = JSON.parse(jsonParam);
-      var ifId = assignmentData.ifId;
-      var ifTranId = assignmentData.ifTranId || ifId;
-      var palletAssignments = assignmentData.palletAssignments || [];
-      var batchNumber = assignmentData.batchNumber || 1;
-      var totalBatches = assignmentData.totalBatches || 1;
+      var payload = JSON.parse(jsonParam);
       
-      log.audit('getInputData', 'IF ' + ifTranId + ' - Processing batch ' + batchNumber + ' of ' + totalBatches + ' with ' + palletAssignments.length + ' pallet assignment(s)');
+      // Normalize input to array of IF jobs
+      // Support both single-IF payload and multi-IF payload with jobs[] wrapper
+      var jobs = payload.jobs ? payload.jobs : [payload];
       
-      if (palletAssignments.length === 0) {
-        log.warning('getInputData', 'IF ' + ifTranId + ' - No pallet assignments in batch');
-        // Return empty search to prevent processing (using non-existent ID)
-        return search.create({
-          type: 'itemfulfillment',
-          filters: [['internalid', 'is', '-1']]
-        });
+      log.audit('getInputData', 'Processing ' + jobs.length + ' IF job(s)');
+      
+      // Flatten all palletAssignments across all jobs into one array
+      var allAssignments = [];
+      
+      for (var j = 0; j < jobs.length; j++) {
+        var job = jobs[j];
+        var ifId = job.ifId;
+        var ifTranId = job.ifTranId || job.ifId;
+        var palletAssignments = job.palletAssignments || [];
+        var itemVpnMap = job.itemVpnMap || {};
+        var totalPallets = job.totalPallets || palletAssignments.length;
+        
+        if (palletAssignments.length === 0) {
+          log.debug('getInputData', 'IF ' + ifTranId + ' - No pallet assignments');
+          continue;
+        }
+        
+        // For each assignment in this job, stamp it with job-level data
+        for (var i = 0; i < palletAssignments.length; i++) {
+          var assignment = palletAssignments[i];
+          
+          // Stamp assignment with job-level data
+          assignment.ifId = ifId;
+          assignment.ifTranId = ifTranId;
+          assignment.itemVpnMap = itemVpnMap;
+          assignment.totalPallets = totalPallets;
+          
+          // Pallet numbering resets per IF (not globally across the MR run)
+          assignment.mrPalletNumber = i + 1;  // 1-based index within that IF
+          
+          allAssignments.push(assignment);
+        }
+        
+        log.audit('getInputData', 'IF ' + ifTranId + ' - Added ' + palletAssignments.length + ' pallet assignment(s)');
       }
       
-      // Return a search for the IF record - map will read the parameter
-      return search.create({
-        type: 'itemfulfillment',
-        filters: [
-          ['internalid', 'anyof', ifId]
-        ],
-        columns: [
-          search.createColumn({ name: 'internalid' }),
-          search.createColumn({ name: 'tranid' })
-        ]
-      });
+      if (allAssignments.length === 0) {
+        log.debug('getInputData', 'No pallet assignments found in any job');
+        return [];
+      }
+      
+      log.audit('getInputData', 'Total pallet assignments to process: ' + allAssignments.length);
+      
+      // Return flattened assignments array
+      return allAssignments;
       
     } catch (e) {
       log.error('getInputData', 'Error getting input data: ' + e.toString());
@@ -191,109 +109,54 @@ define([
   }
   
   /**
-   * Map function - reads assignment data from script parameter and emits each assignment
+   * Map function - processes a single pallet assignment from input data
    * @param {Object} mapContext
    */
   function map(mapContext) {
     try {
-      // Read assignment data from script parameter
-      // When called via task.create(), parameters are accessed through executionContext
-      var jsonParam = null;
-      var paramNames = [
-        'custscriptjson',
-        'custscript_assign_packages_to_pallets_json',
-        'custscript_assign_packages_to_pallets_pallet_assignment_json',
-        'custscript_pallet_assignment_json'
-      ];
+      // Get the single assignment from input data
+      // NetSuite serializes array elements to JSON strings when passing to map()
+      var assignment = typeof mapContext.value === 'string' 
+        ? JSON.parse(mapContext.value) 
+        : mapContext.value;
       
-      // Try executionContext first (for task.create() calls)
-      var executionContext = mapContext.executionContext;
-      if (executionContext) {
-        for (var j = 0; j < paramNames.length && !jsonParam; j++) {
-          try {
-            jsonParam = executionContext.getParameter({ name: paramNames[j] });
-            if (jsonParam) {
-              log.debug('map', 'Found parameter in executionContext with name: ' + paramNames[j]);
-              break;
-            }
-          } catch (e) {
-            // Continue trying
-          }
-        }
-      }
-      
-      // Fallback: try runtime.getCurrentScript()
-      if (!jsonParam) {
-        try {
-          var scriptObj = runtime.getCurrentScript();
-          for (var i = 0; i < paramNames.length && !jsonParam; i++) {
-            try {
-              jsonParam = scriptObj.getParameter({ name: paramNames[i] });
-              if (jsonParam) {
-                log.debug('map', 'Found parameter with name: ' + paramNames[i]);
-                break;
-              }
-            } catch (e) {
-              // Continue trying
-            }
-          }
-        } catch (e) {
-          log.debug('map', 'Could not get script object: ' + e.toString());
-        }
-      }
-      
-      if (!jsonParam) {
-        log.error('map', 'No pallet assignment JSON parameter found. Tried: ' + paramNames.join(', '));
+      if (!assignment || !assignment.palletId) {
+        log.error('map', 'Invalid assignment data in mapContext.value: ' + JSON.stringify(mapContext.value));
         return;
       }
       
-      var assignmentData = JSON.parse(jsonParam);
-      var ifId = assignmentData.ifId;
-      var ifTranId = assignmentData.ifTranId || ifId;
-      var palletAssignments = assignmentData.palletAssignments || [];
-      var batchNumber = assignmentData.batchNumber || 1;
-      var totalBatches = assignmentData.totalBatches || 1;
-      var itemVpnMap = assignmentData.itemVpnMap || {};  // Get VPN map from assignment data
+      var ifId = assignment.ifId;
+      var ifTranId = assignment.ifTranId || ifId;
+      var itemVpnMap = assignment.itemVpnMap || {};
       
-      log.debug('map', 'IF ' + ifTranId + ' - Processing batch ' + batchNumber + ' of ' + totalBatches + ' with ' + palletAssignments.length + ' pallet assignment(s)');
-      log.debug('map', 'VPN Map received with ' + Object.keys(itemVpnMap).length + ' item(s)');
-      
-      // Emit each pallet assignment
-      for (var i = 0; i < palletAssignments.length; i++) {
-        var assignment = palletAssignments[i];
-        
-        // Add VPN to each item in the items array using the map
-        var itemsWithVpn = (assignment.items || []).map(function(item) {
-          var itemWithVpn = {
-            itemId: item.itemId,
-            quantity: item.quantity,
-            cartons: item.cartons,
-            vpn: itemVpnMap[item.itemId] || ''  // Add VPN from map
-          };
-          return itemWithVpn;
-        });
-        
-        var dataToEmit = {
-          ifId: ifId,
-          tranId: ifTranId,
-          palletIndex: i,
-          palletId: assignment.palletId,
-          packageIds: assignment.packageIds || [],
-          contentIds: assignment.contentIds || [],
-          items: itemsWithVpn,  // Array of {itemId, quantity, cartons, vpn}
-          totalCartons: assignment.totalCartons || 0,  // Total carton count for this pallet
-          batchNumber: batchNumber,
-          totalBatches: totalBatches
+      // Add VPN to each item in the items array using the map
+      var itemsWithVpn = (assignment.items || []).map(function(item) {
+        var itemWithVpn = {
+          itemId: item.itemId,
+          quantity: item.quantity,
+          cartons: item.cartons,
+          vpn: itemVpnMap[item.itemId] || ''  // Add VPN from map
         };
-        
-        // Use IF ID as key to group all pallets for same IF together
-        mapContext.write({
-          key: ifId,
-          value: dataToEmit
-        });
-      }
+        return itemWithVpn;
+      });
       
-      log.debug('map', 'IF ' + ifTranId + ' - Emitted ' + palletAssignments.length + ' pallet assignment(s)');
+      var dataToEmit = {
+        ifId: ifId,
+        ifTranId: ifTranId,
+        palletId: assignment.palletId,
+        mrPalletNumber: assignment.mrPalletNumber || 1,  // 1-based index within this MR run
+        totalPallets: assignment.totalPallets || 1,  // Total pallets across all batches
+        packageIds: assignment.packageIds || [],
+        contentIds: assignment.contentIds || [],
+        items: itemsWithVpn,  // Array of {itemId, quantity, cartons, vpn}
+        totalCartons: assignment.totalCartons || 0  // Total carton count for this pallet
+      };
+      
+      // Use palletId as key to process each pallet separately
+      mapContext.write({
+        key: assignment.palletId,
+        value: dataToEmit
+      });
       
     } catch (e) {
       log.error('map', 'Error processing record: ' + e.toString());
@@ -301,172 +164,144 @@ define([
   }
   
   /**
-   * Reduce function - creates pallets and updates packages/contents for each batch
+   * Reduce function - processes a single pallet assignment
    * @param {Object} reduceContext
    */
   function reduce(reduceContext) {
     try {
-      var ifId = reduceContext.key;
-      var assignments = [];
+      // reduceContext.key is the palletId
+      var palletId = reduceContext.key;
       
-      // Collect all assignments for this IF
-      for (var i = 0; i < reduceContext.values.length; i++) {
-        var assignmentData = JSON.parse(reduceContext.values[i]);
-        assignments.push(assignmentData);
-      }
-      
-      if (assignments.length === 0) {
-        log.warning('reduce', 'IF ' + ifId + ' - No assignments to process');
+      if (!palletId) {
+        log.error('reduce', 'No pallet ID in reduce key');
         return;
       }
       
-      var tranId = assignments[0].tranId || ifId;
-      log.audit('reduce', 'IF ' + tranId + ' - Processing ' + assignments.length + ' pallet assignment(s)');
-      
-      // Load IF record once to get entity ID if needed
-      var entityId = null;
-      try {
-        var ifRecord = record.load({
-          type: 'itemfulfillment',
-          id: ifId,
-          isDynamic: false
-        });
-        entityId = ifRecord.getValue('entity');
-      } catch (e) {
-        log.warning('reduce', 'IF ' + tranId + ' - Could not load IF record: ' + e.toString());
+      // Get the single assignment for this pallet
+      if (reduceContext.values.length === 0) {
+        log.debug('reduce', 'Pallet ' + palletId + ' - No assignment data to process');
+        return;
       }
       
-      var packagesUpdated = 0;
-      var contentsUpdated = 0;
+      var assignment = JSON.parse(reduceContext.values[0]);
+      var ifId = assignment.ifId;
+      var ifTranId = assignment.ifTranId || ifId;
+      var mrPalletNumber = assignment.mrPalletNumber || 1;
+      var totalPallets = assignment.totalPallets || 1;
+      
       var errors = [];
       
-      // Process each pallet assignment
-      for (var a = 0; a < assignments.length; a++) {
-        var assignment = assignments[a];
-        var palletId = assignment.palletId;
-        var palletIndex = assignment.palletIndex + 1; // 1-based index
-        
+      // Generate and save SSCC for this pallet
+      var sscc = null;
+      try {
+        sscc = ssccLib.generateAndSaveSSCC(palletId);
+      } catch (ssccError) {
+        var ssccErrorMsg = 'Failed to generate SSCC: ' + ssccError.toString();
+        log.error('reduce', ssccErrorMsg);
+        errors.push(ssccErrorMsg);
+        // Continue processing - don't fail the whole pallet
+      }
+      
+      // Create JSON for pallet with items (including VPN) and total cartons
+      var palletJson = {
+        items: assignment.items || [],  // Items already have VPN from map phase
+        totalCartons: assignment.totalCartons || 0
+      };
+      var palletJsonString = JSON.stringify(palletJson);
+      
+      // Update pallet with JSON data in custrecord_package_json
+      try {
+        record.submitFields({
+          type: PALLET_RECORD_TYPE,
+          id: palletId,
+          values: {
+            custrecord_package_json: palletJsonString
+          },
+          options: {
+            enableSourcing: false,
+            ignoreMandatoryFields: true
+          }
+        });
+      } catch (jsonError) {
+        var errorMsg = 'Failed to update pallet JSON field: ' + jsonError.toString();
+        log.error('reduce', errorMsg);
+        errors.push(errorMsg);
+        // Continue processing - don't fail the whole pallet
+      }
+      
+      // Update packages with pallet ID
+      var packageIds = assignment.packageIds || [];
+      var packagesUpdated = 0;
+      for (var p = 0; p < packageIds.length; p++) {
         try {
-          // Pallet should already be created by library code
-          if (!palletId) {
-            var errorMsg = 'IF ' + tranId + ' - Pallet ID missing for pallet index ' + palletIndex + '. Pallet should have been created by library code.';
-            log.error('reduce', errorMsg);
-            errors.push(errorMsg);
-            continue; // Skip this pallet assignment
-          }
+          var packageId = packageIds[p];
           
-          log.debug('reduce', 'IF ' + tranId + ' - Processing pallet ' + palletId);
-          
-          // Generate and save SSCC for this pallet (before assigning packages)
-          try {
-            var sscc = ssccLib.generateAndSaveSSCC(palletId);
-            log.debug('reduce', 'IF ' + tranId + ' - Generated SSCC for pallet ' + palletId + ': ' + sscc);
-          } catch (ssccError) {
-            var ssccErrorMsg = 'IF ' + tranId + ' - Failed to generate SSCC for pallet ' + palletId + ': ' + ssccError.toString();
-            log.error('reduce', ssccErrorMsg);
-            errors.push(ssccErrorMsg);
-            // Continue processing - don't fail the whole pallet
-          }
-          
-          // Create JSON for pallet with items (including VPN) and total cartons
-          var palletJson = {
-            items: assignment.items || [],  // Items already have VPN from map phase
-            totalCartons: assignment.totalCartons || 0
-          };
-          var palletJsonString = JSON.stringify(palletJson);
-          
-          // Update pallet with JSON data in custrecord17
-          try {
-            record.submitFields({
-              type: PALLET_RECORD_TYPE,
-              id: palletId,
-              values: {
-                custrecord17: palletJsonString
-              },
-              options: {
-                enableSourcing: false,
-                ignoreMandatoryFields: true
-              }
-            });
-            log.debug('reduce', 'IF ' + tranId + ' - Updated pallet ' + palletId + ' with JSON data');
-          } catch (jsonError) {
-            var errorMsg = 'IF ' + tranId + ' - Failed to update pallet JSON field ' + palletId + ': ' + jsonError.toString();
-            log.error('reduce', errorMsg);
-            errors.push(errorMsg);
-            // Continue processing - don't fail the whole pallet
-          }
-          
-          // Update packages with pallet ID
-          var packageIds = assignment.packageIds || [];
-          for (var p = 0; p < packageIds.length; p++) {
-            try {
-              var packageId = packageIds[p];
-              
-              record.submitFields({
-                type: 'customrecord_sps_package',
-                id: packageId,
-                values: {
-                  [PACKAGE_PALLET_FIELD]: palletId
-                },
-                options: {
-                  enableSourcing: false,
-                  ignoreMandatoryFields: true
-                }
-              });
-              
-              packagesUpdated++;
-              
-            } catch (pkgError) {
-              var errorMsg = 'IF ' + tranId + ' - Failed to update package ' + packageIds[p] + ': ' + pkgError.toString();
-              log.error('reduce', errorMsg);
-              errors.push(errorMsg);
+          record.submitFields({
+            type: 'customrecord_sps_package',
+            id: packageId,
+            values: {
+              [PACKAGE_PALLET_FIELD]: palletId
+            },
+            options: {
+              enableSourcing: false,
+              ignoreMandatoryFields: true
             }
-          }
+          });
           
-          // Update package contents with pallet ID
-          var contentIds = assignment.contentIds || [];
-          for (var c = 0; c < contentIds.length; c++) {
-            try {
-              var contentId = contentIds[c];
-              
-              record.submitFields({
-                type: 'customrecord_sps_content',
-                id: contentId,
-                values: {
-                  [PACKAGE_CONTENT_PALLET_FIELD]: palletId
-                },
-                options: {
-                  enableSourcing: false,
-                  ignoreMandatoryFields: true
-                }
-              });
-              
-              contentsUpdated++;
-              
-            } catch (contentError) {
-              var errorMsg = 'IF ' + tranId + ' - Failed to update package content ' + contentIds[c] + ': ' + contentError.toString();
-              log.error('reduce', errorMsg);
-              errors.push(errorMsg);
-            }
-          }
+          packagesUpdated++;
           
-          log.debug('reduce', 'IF ' + tranId + ' - Pallet ' + palletId + ': Updated ' + packageIds.length + ' package(s) and ' + contentIds.length + ' content record(s)');
-          
-        } catch (assignmentError) {
-          var errorMsg = 'IF ' + tranId + ' - Error processing pallet assignment ' + (a + 1) + ': ' + assignmentError.toString();
+        } catch (pkgError) {
+          var errorMsg = 'Failed to update package ' + packageIds[p] + ': ' + pkgError.toString();
           log.error('reduce', errorMsg);
           errors.push(errorMsg);
         }
       }
       
-      // Log summary
+      // Update package contents with pallet ID
+      var contentIds = assignment.contentIds || [];
+      var contentsUpdated = 0;
+      for (var c = 0; c < contentIds.length; c++) {
+        try {
+          var contentId = contentIds[c];
+          
+          record.submitFields({
+            type: 'customrecord_sps_content',
+            id: contentId,
+            values: {
+              [PACKAGE_CONTENT_PALLET_FIELD]: palletId
+            },
+            options: {
+              enableSourcing: false,
+              ignoreMandatoryFields: true
+            }
+          });
+          
+          contentsUpdated++;
+          
+        } catch (contentError) {
+          var errorMsg = 'Failed to update package content ' + contentIds[c] + ': ' + contentError.toString();
+          log.error('reduce', errorMsg);
+          errors.push(errorMsg);
+        }
+      }
+      
+      // Emit to output for tracking completion (always emit to count all pallets)
+      reduceContext.write({
+        key: ifId,
+        value: JSON.stringify({
+          ifId: ifId,
+          ifTranId: ifTranId,
+          palletId: palletId,
+          mrPalletNumber: mrPalletNumber,
+          totalPallets: totalPallets,
+          packagesUpdated: packagesUpdated,
+          contentsUpdated: contentsUpdated,
+          status: 'populated'
+        })
+      });
+      
       if (errors.length > 0) {
-        log.error('reduce', 'IF ' + tranId + ' - Completed with errors: ' + errors.length + ' error(s)');
-        log.error('reduce', 'IF ' + tranId + ' - Errors: ' + JSON.stringify(errors));
-      } else {
-        log.audit('reduce', 'IF ' + tranId + ' - Successfully processed: ' + 
-          packagesUpdated + ' package(s) updated, ' + 
-          contentsUpdated + ' content record(s) updated');
+        log.error('reduce', 'IF ' + ifTranId + ', pallet ' + palletId + ' - Errors: ' + errors.length);
       }
       
     } catch (e) {
@@ -475,43 +310,144 @@ define([
   }
   
   /**
-   * Summary function - logs final statistics
+   * Summary function - logs final statistics and updates pallet notes field
    * @param {Object} summaryContext
    */
   function summarize(summaryContext) {
     try {
       var usage = summaryContext.usage;
       var output = summaryContext.output;
-      var mapErrors = summaryContext.mapErrors;
-      var reduceErrors = summaryContext.reduceErrors;
+      var mapErrors = summaryContext.mapErrors || [];
+      var reduceErrors = summaryContext.reduceErrors || [];
       
-      log.audit('summarize', 'Map usage: ' + usage + ' units');
-      log.audit('summarize', 'Map errors: ' + mapErrors.length);
-      log.audit('summarize', 'Reduce errors: ' + reduceErrors.length);
-      
-      if (mapErrors.length > 0) {
-        log.error('summarize', 'Map errors: ' + JSON.stringify(mapErrors));
+      if (mapErrors.length > 0 || reduceErrors.length > 0) {
+        log.audit('summarize', 'Map usage: ' + usage + ' units, Map errors: ' + mapErrors.length + ', Reduce errors: ' + reduceErrors.length);
+        if (mapErrors.length > 0) log.error('summarize', 'Map errors: ' + JSON.stringify(mapErrors));
+        if (reduceErrors.length > 0) log.error('summarize', 'Reduce errors: ' + JSON.stringify(reduceErrors));
       }
       
-      if (reduceErrors.length > 0) {
-        log.error('summarize', 'Reduce errors: ' + JSON.stringify(reduceErrors));
-      }
+      // Process output to track pallet population completion
+      var ifPopulationMap = {}; // {ifId: {ifTranId, palletCount, totalPallets}}
       
-      // Process any output from reduce phase
-      if (output && typeof output.iterator === 'function') {
+      // Helper function to process a single output record
+      function processOutputRecord(ifId, valueStr) {
         try {
-          var outputIterator = output.iterator();
-          var outputCount = 0;
-          while (outputIterator.hasNext()) {
-            var outputData = outputIterator.next();
-            outputCount++;
+          var value = JSON.parse(valueStr);
+          if (value.status === 'populated' && value.ifId) {
+            if (!ifPopulationMap[ifId]) {
+              ifPopulationMap[ifId] = {
+                ifId: value.ifId,
+                ifTranId: value.ifTranId || value.ifId,
+                palletCount: 0,
+                totalPallets: value.totalPallets || 0
+              };
+            }
+            ifPopulationMap[ifId].palletCount++;
+            if (value.totalPallets && value.totalPallets > ifPopulationMap[ifId].totalPallets) {
+              ifPopulationMap[ifId].totalPallets = value.totalPallets;
+            }
           }
-          log.audit('summarize', 'Total output records: ' + outputCount);
-        } catch (outputError) {
-          log.debug('summarize', 'Could not iterate output: ' + outputError.toString());
+        } catch (e) {
+          // Skip invalid records
         }
-      } else {
-        log.debug('summarize', 'No output iterator available');
+      }
+      
+      // Process output using iterator pattern
+      if (output) {
+        try {
+          var iterator = (typeof output.iterator === 'function') ? output.iterator() : output;
+          var outputCount = 0;
+          
+          if (typeof iterator.hasNext === 'function') {
+            while (iterator.hasNext()) {
+              var outputData = iterator.next();
+              processOutputRecord(outputData.key, typeof outputData.value === 'string' ? outputData.value : JSON.stringify(outputData.value));
+              outputCount++;
+            }
+          } else if (typeof iterator.each === 'function') {
+            iterator.each(function(key, value) {
+              processOutputRecord(key, typeof value === 'string' ? value : JSON.stringify(value));
+              outputCount++;
+              return true;
+            });
+          }
+          
+          if (outputCount > 0) {
+            log.audit('summarize', 'Total output records processed: ' + outputCount);
+          }
+        } catch (outputError) {
+          log.error('summarize', 'Error processing output: ' + outputError.toString());
+        }
+      }
+      
+      // Update pallet notes field and completion flag for each IF that had pallets populated
+      var notesUpdatedCount = 0;
+      var notesErrorCount = 0;
+      var flagSetCount = 0;
+      var flagErrorCount = 0;
+      
+      for (var ifId in ifPopulationMap) {
+        var population = ifPopulationMap[ifId];
+        var palletsPopulated = population.palletCount;
+        var expectedTotal = population.totalPallets;
+        var ifTranId = population.ifTranId;
+        
+        // Check if all pallets for this IF were populated
+        var allPalletsComplete = (expectedTotal > 0 && palletsPopulated >= expectedTotal);
+        
+        if (!allPalletsComplete) {
+          log.audit('summarize', 'IF ' + ifTranId + ' - Not all pallets populated. Expected: ' + expectedTotal + ', Actual: ' + palletsPopulated);
+        }
+        
+        try {
+          // Load current pallet notes to append to it
+          var ifRecord = record.load({
+            type: 'itemfulfillment',
+            id: ifId,
+            isDynamic: false
+          });
+          
+          var currentNotes = ifRecord.getValue('custbody_pallet_notes') || '';
+          var appendText = 'populated ' + palletsPopulated + ' pallet' + (palletsPopulated !== 1 ? 's' : '');
+          var newNotes = currentNotes ? (currentNotes + '. ' + appendText) : appendText;
+          
+          // Prepare field updates
+          var fieldUpdates = {
+            custbody_pallet_notes: newNotes
+          };
+          
+          // Only set completion flag if ALL pallets were populated
+          if (allPalletsComplete) {
+            fieldUpdates.custbody_completed_pallet_population = true;
+          }
+          
+          record.submitFields({
+            type: 'itemfulfillment',
+            id: ifId,
+            values: fieldUpdates,
+            options: {
+              enableSourcing: false,
+              ignoreMandatoryFields: true
+            }
+          });
+          
+          notesUpdatedCount++;
+          if (allPalletsComplete) {
+            flagSetCount++;
+          }
+          
+        } catch (fieldError) {
+          notesErrorCount++;
+          if (allPalletsComplete) {
+            flagErrorCount++;
+          }
+          log.error('summarize', 'IF ' + ifTranId + ' (ID: ' + ifId + ') - Error updating pallet fields: ' + fieldError.toString());
+          // Continue processing other IFs even if one fails
+        }
+      }
+      
+      if (Object.keys(ifPopulationMap).length > 0) {
+        log.audit('summarize', 'Updated notes: ' + notesUpdatedCount + ' IF(s), Completion flags: ' + flagSetCount + ', Errors: ' + notesErrorCount);
       }
       
     } catch (e) {

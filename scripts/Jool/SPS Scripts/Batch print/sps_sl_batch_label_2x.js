@@ -182,8 +182,14 @@ define(["require", "exports", "N/error", "N/log", "N/config", "N/record", "N/tas
                 if (packageId) {
                     return;
                 }
-                // TODO: update logging for this before go live
-                log.debug('Label UID: ', labelUid_1);
+                log.audit('Label Generation Complete', {
+                    itemFulfillmentId: currIfId_1,
+                    labelUid: labelUid_1,
+                    labelsCreated: currentLabelCount_1,
+                    packageId: packageId || 'ALL',
+                    packageSource: packageSource,
+                    packStructure: packStructure,
+                });
                 var finalMessage = "Finished Creating Label(s) for " + currIfId_1 + ". " + currentLabelCount_1 + " Label(s) PDF are available for print/download on the Communication -> Files sublist. ";
                 ctx.response.write(finalMessage);
                 record.submitFields({

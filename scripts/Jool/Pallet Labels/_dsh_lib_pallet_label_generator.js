@@ -20,30 +20,25 @@ define([
   
   /**
    * Main function to generate pallet label PDF
-   * @param {string} palletId - Pallet record internal ID (optional)
-   * @param {string} ifId - Item Fulfillment internal ID (optional, used if palletId not provided)
+   * @param {string} palletId - Pallet record internal ID
    * @param {number} pdfFolderId - File cabinet folder ID for PDF storage
    * @param {string} templateId - Advanced PDF/HTML Template ID (optional, defaults to CUSTTMPL_DSH_PALLET_LABEL)
-   * @param {Object} options - Additional options (palletNumber, etc.)
    * @returns {Object} Result object with success status and fileId
    */
-  function generatePalletLabel(palletId, ifId, pdfFolderId, templateId, options) {
+  function generatePalletLabel(palletId, pdfFolderId, templateId) {
     try {
-      options = options || {};
       
-      // Step 1: Collect data from pallet record or IF
+      if (!palletId) {
+        return {
+          success: false,
+          error: 'palletId must be provided'
+        };
+      }
+      
+      // Step 1: Collect data from pallet record
       var jsonData;
       try {
-        if (palletId) {
-          jsonData = collectPalletData(palletId);
-        } else if (ifId) {
-          jsonData = collectIFPalletData(ifId, options);
-        } else {
-          return {
-            success: false,
-            error: 'Either palletId or ifId must be provided'
-          };
-        }
+        jsonData = collectPalletData(palletId);
       } catch (collectError) {
         log.error('generatePalletLabel - collectPalletData Failed', collectError);
         return {
@@ -60,7 +55,7 @@ define([
         };
       }
       
-      log.debug('generatePalletLabel', 'Data collected - palletName: ' + jsonData.palletName + ', ifId: ' + jsonData.ifId + ', locationId: ' + jsonData.locationId);
+      log.debug('generatePalletLabel', 'Data collected - ifId: ' + jsonData.ifId + ', locationId: ' + jsonData.locationId);
       
       // Step 2: Use provided folder ID or default
       pdfFolderId = pdfFolderId || 1373; // Default folder ID (same as BOL)
@@ -92,7 +87,7 @@ define([
             }
             
             // Save barcode file to file cabinet
-            var barcodeFileName = 'SSCC_Barcode_' + (palletId || ifId) + '.' + barcodeFileExtension;
+            var barcodeFileName = 'SSCC_Barcode_PLT-' + (palletId || ifId) + '.' + barcodeFileExtension;
             
             log.debug('Creating Barcode File', 'FileType: ' + barcodeFileType + ' (type: ' + typeof barcodeFileType + '), Extension: ' + barcodeFileExtension + ', Data length: ' + barcodeResult.data.length);
             
@@ -172,7 +167,7 @@ define([
       }
       
       log.debug('generatePalletLabel', 'Starting PDF render - templateId: ' + templateId + ', pdfFolderId: ' + pdfFolderId);
-      var fileId = renderPalletLabelPdf(jsonData, palletId || ifId, pdfFolderId, templateId);
+      var fileId = renderPalletLabelPdf(jsonData, palletId, pdfFolderId, templateId);
       
       if (!fileId) {
         return {
@@ -181,36 +176,21 @@ define([
         };
       }
       
-      // Step 4: Optionally attach PDF to pallet record or IF
-      if (options.attachToRecord !== false) {
-        try {
-          if (palletId) {
-            record.attach({
-              record: {
-                type: 'file',
-                id: fileId
-              },
-              to: {
-                type: 'customrecord_asn_pallet',
-                id: palletId
-              }
-            });
-          } else if (ifId) {
-            record.attach({
-              record: {
-                type: 'file',
-                id: fileId
-              },
-              to: {
-                type: 'itemfulfillment',
-                id: ifId
-              }
-            });
+      // Step 4: Attach PDF to pallet record
+      try {
+        record.attach({
+          record: {
+            type: 'file',
+            id: fileId
+          },
+          to: {
+            type: 'customrecord_asn_pallet',
+            id: palletId
           }
-        } catch (attachError) {
-          log.error('Error attaching PDF', attachError);
-          // Don't fail the whole operation if attachment fails
-        }
+        });
+      } catch (attachError) {
+        log.error('Error attaching PDF', attachError);
+        // Don't fail the whole operation if attachment fails
       }
       
       // Get PDF URL for return value
@@ -251,15 +231,18 @@ define([
     try {
       log.audit('collectPalletData', 'Collecting data for pallet: ' + palletId);
       
-      // Load pallet record
+      // Load pallet record - get all fields at once
       var palletRecord = record.load({
         type: 'customrecord_asn_pallet',
         id: palletId,
         isDynamic: false
       });
       
-      var palletName = palletRecord.getValue('name') || palletId;
       var ifId = palletRecord.getValue('custrecord_parent_if');
+      var palletNumber = palletRecord.getValue('custrecord_pallet_index');
+      var totalPallets = palletRecord.getValue('custrecord_total_pallet_count');
+      var ssccRaw = palletRecord.getValue('custrecord_sscc') || '';
+      var custrecord17Value = palletRecord.getValue('custrecord_package_json') || '';
       
       // Get IF data if available
       var ifData = null;
@@ -298,34 +281,13 @@ define([
         return true;
       });
       
-      // ASIN placeholder (hardcoded for now)
-      var asin = 'ASIN_PLACEHOLDER';
-      
-      // Get pallet index and total pallet count from pallet record (already set when pallet was created)
-      var palletNumber = palletRecord.getValue('custrecord_pallet_index') || 1;
-      var totalPallets = palletRecord.getValue('custrecord_total_pallet_count') || 1;
-      
-      // Get SSCC (Serial Shipping Container Code) from pallet record field custrecord_sscc
-      // Value will be 20 digits with zeroes
-      var ssccRaw = palletRecord.getValue('custrecord_sscc') || '';
-      log.debug('SSCC Debug - collectPalletData', 'Pallet ID: ' + palletId + ', ssccRaw from field: "' + ssccRaw + '", length: ' + ssccRaw.length);
-      
-      // Extract just the digits (in case there's any formatting) - keep full 20 digits
+      // Extract SSCC digits
       var ssccDigits = ssccRaw.replace(/[^0-9]/g, '');
-      log.debug('SSCC Debug - collectPalletData', 'ssccDigits after cleanup: "' + ssccDigits + '", length: ' + ssccDigits.length);
-      
-      // For barcode: Use the 20-digit value directly from the field
-      var ssccBarcode = ssccDigits; // 20-digit value from custrecord_sscc field
-      log.debug('SSCC Debug - collectPalletData', 'ssccBarcode formatted: "' + ssccBarcode + '", length: ' + ssccBarcode.length);
-      
-      // For display: Show the full 20-digit value (human-readable)
-      var sscc = ssccDigits;
-      log.debug('SSCC Debug - collectPalletData', 'sscc for display: "' + sscc + '", length: ' + sscc.length);
+      log.debug('SSCC Debug - collectPalletData', 'Pallet ID: ' + palletId + ', ssccRaw: "' + ssccRaw + '", ssccDigits: "' + ssccDigits + '"');
       
       // Build JSON data object for template
       var jsonData = {
         palletId: palletId,
-        palletName: palletName,
         palletNumber: palletNumber,
         totalPallets: totalPallets,
         date: formatDate(new Date()),
@@ -348,187 +310,22 @@ define([
         bolNumber: (ifData && ifData.bolNumber) || '',
         proNumber: (ifData && ifData.proNumber) || '',
         arnNumber: (ifData && ifData.arnNumber) || '',
-        // ASIN
-        asin: asin,
-        // Barcodes
-        poBarcode: (ifData && ifData.poNumber) || '',
-        sscc: sscc, // SSCC value from custrecord_sscc field (20 digits) - for display
-        ssccBarcode: ssccBarcode, // SSCC value from custrecord_sscc field (20 digits) - used directly for barcode
+        // SSCC
+        sscc: ssccDigits, // SSCC value from custrecord_sscc field (20 digits) - for display
+        ssccBarcode: ssccDigits, // SSCC value from custrecord_sscc field (20 digits) - used directly for barcode
         ssccDisplayText: '', // Will be set after barcode generation with formatted text: (00)108425590000000851
-        barcode: palletId,
-        qrCode: palletId
+        // Carton data from custrecord_package_json
+        custrecord_package_json: custrecord17Value
       };
       
       log.debug('SSCC Debug - collectPalletData', 'Final jsonData.ssccBarcode: "' + jsonData.ssccBarcode + '", length: ' + (jsonData.ssccBarcode ? jsonData.ssccBarcode.length : 0));
-      log.debug('SSCC Debug - collectPalletData', 'Final jsonData.sscc: "' + jsonData.sscc + '", length: ' + (jsonData.sscc ? jsonData.sscc.length : 0));
-      
       log.debug('collectPalletData', 'Built jsonData - locationId: ' + jsonData.locationId + ', hasShipFromAddress: ' + (jsonData.shipFromAddress && Object.keys(jsonData.shipFromAddress).length > 0));
-      log.audit('collectPalletData', 'Data collected successfully for pallet: ' + palletName);
+      log.audit('collectPalletData', 'Data collected successfully for pallet: ' + palletId);
       return jsonData;
       
     } catch (error) {
       log.error('collectPalletData Error', error);
       throw new Error('Error collecting pallet data: ' + error.message);
-    }
-  }
-  
-  /**
-   * Collect pallet data from Item Fulfillment (for generating labels for all pallets on an IF)
-   * @param {string} ifId - Item Fulfillment internal ID
-   * @param {Object} options - Options (palletNumber, etc.)
-   * @returns {Object|null} JSON data object for template or null if error
-   */
-  function collectIFPalletData(ifId, options) {
-    try {
-      log.audit('collectIFPalletData', 'Collecting data for IF: ' + ifId);
-      
-      var ifData = getIFData(ifId);
-      
-      // Get pallets for this IF
-      var pallets = [];
-      var palletSearch = search.create({
-        type: 'customrecord_asn_pallet',
-        filters: [
-          ['custrecord_parent_if', 'anyof', ifId]
-        ],
-        columns: [
-          search.createColumn({ name: 'internalid' }),
-          search.createColumn({ name: 'name' })
-        ]
-      });
-      
-      palletSearch.run().each(function(result) {
-        pallets.push({
-          palletId: result.id,
-          palletName: result.getValue('name')
-        });
-        return true;
-      });
-      
-      // If specific pallet number requested, filter to that pallet
-      var palletNumber = options.palletNumber;
-      if (palletNumber) {
-        pallets = pallets.filter(function(p) {
-          return p.palletName.indexOf(palletNumber) >= 0 || p.palletId === palletNumber;
-        });
-      }
-      
-      // For now, return data for first pallet (can be extended to return array)
-      // Or if palletNumber specified, return that specific pallet
-      var targetPallet = pallets.length > 0 ? pallets[0] : null;
-      
-      if (!targetPallet) {
-        throw new Error('No pallets found for IF: ' + ifId);
-      }
-      
-      // Get packages for this pallet
-      var packages = [];
-      var packageSearch = search.create({
-        type: 'customrecord_sps_package',
-        filters: [
-          ['custrecord_parent_pallet', 'anyof', targetPallet.palletId]
-        ],
-        columns: [
-          search.createColumn({ name: 'internalid' }),
-          search.createColumn({ name: 'name' }),
-          search.createColumn({ name: 'custrecord_sps_pk_weight' })
-        ]
-      });
-      
-      packageSearch.run().each(function(result) {
-        packages.push({
-          packageId: result.id,
-          packageName: result.getValue('name'),
-          weight: result.getValue('custrecord_sps_pk_weight') || 0
-        });
-        return true;
-      });
-      
-      // ASIN placeholder (hardcoded for now)
-      var asin = 'ASIN_PLACEHOLDER';
-      
-      // Get pallet number and total
-      var palletNumber = 1;
-      var totalPallets = pallets.length;
-      for (var i = 0; i < pallets.length; i++) {
-        if (pallets[i].palletId === targetPallet.palletId) {
-          palletNumber = i + 1;
-          break;
-        }
-      }
-      
-      // Get SSCC
-      // Get SSCC (Serial Shipping Container Code) from pallet record field custrecord_sscc
-      // Value will be 20 digits with zeroes
-      var ssccRaw = '';
-      var ssccBarcode = '';
-      var sscc = '';
-      
-      try {
-        var palletRecord = record.load({
-          type: 'customrecord_asn_pallet',
-          id: targetPallet.palletId,
-          isDynamic: false
-        });
-        ssccRaw = palletRecord.getValue('custrecord_sscc') || '';
-        log.debug('SSCC Debug - collectIFPalletData', 'Pallet ID: ' + targetPallet.palletId + ', ssccRaw from field: "' + ssccRaw + '", length: ' + ssccRaw.length);
-        
-        // Extract just the digits (in case there's any formatting) - keep full 20 digits
-        var ssccDigits = ssccRaw.replace(/[^0-9]/g, '');
-        log.debug('SSCC Debug - collectIFPalletData', 'ssccDigits after cleanup: "' + ssccDigits + '", length: ' + ssccDigits.length);
-        
-        // For barcode: Use the 20-digit value directly from the field
-        ssccBarcode = ssccDigits; // 20-digit value from custrecord_sscc field
-        log.debug('SSCC Debug - collectIFPalletData', 'ssccBarcode formatted: "' + ssccBarcode + '", length: ' + ssccBarcode.length);
-        
-        // For display: Show the full 20-digit value (human-readable)
-        sscc = ssccDigits;
-        log.debug('SSCC Debug - collectIFPalletData', 'sscc for display: "' + sscc + '", length: ' + sscc.length);
-      } catch (e) {
-        log.error('Error loading pallet record for SSCC', 'Pallet ID: ' + targetPallet.palletId + ', Error: ' + e.toString());
-        ssccBarcode = '';
-        sscc = '';
-      }
-      
-      var jsonData = {
-        palletId: targetPallet.palletId,
-        palletName: targetPallet.palletName,
-        palletNumber: palletNumber,
-        totalPallets: totalPallets,
-        date: formatDate(new Date()),
-        packages: packages,
-        packageCount: packages.length,
-        cartonCount: packages.length,
-        totalWeight: calculateTotalWeight(packages),
-        ifId: ifId,
-        ifTranId: ifData.tranId || '',
-        poNumber: ifData.poNumber || '',
-        customerName: ifData.customerName || '',
-        shipToAddress: ifData.shipToAddress || {},
-        shipFromAddress: ifData.shipFromAddress || {},
-        shipFromDetails: ifData.shipFromDetails || {},
-        locationName: ifData.locationName || '',
-        carrierName: ifData.carrierName || '',
-        bolNumber: ifData.bolNumber || '',
-        proNumber: ifData.proNumber || '',
-        arnNumber: ifData.arnNumber || '',
-        asin: asin,
-        poBarcode: ifData.poNumber || '',
-        sscc: sscc, // SSCC value from custrecord_sscc field (20 digits) - for display
-        ssccBarcode: ssccBarcode, // SSCC value from custrecord_sscc field (20 digits) - used directly for barcode
-        ssccDisplayText: '', // Will be set after barcode generation with formatted text: (00)108425590000000851
-        barcode: targetPallet.palletId,
-        qrCode: targetPallet.palletId
-      };
-      
-      log.debug('SSCC Debug - collectIFPalletData', 'Final jsonData.ssccBarcode: "' + jsonData.ssccBarcode + '", length: ' + (jsonData.ssccBarcode ? jsonData.ssccBarcode.length : 0));
-      log.debug('SSCC Debug - collectIFPalletData', 'Final jsonData.sscc: "' + jsonData.sscc + '", length: ' + (jsonData.sscc ? jsonData.sscc.length : 0));
-      
-      return jsonData;
-      
-    } catch (error) {
-      log.error('collectIFPalletData Error', error);
-      throw new Error('Error collecting IF pallet data: ' + error.message);
     }
   }
   
@@ -682,7 +479,7 @@ define([
    */
   function renderPalletLabelPdf(jsonData, recordId, pdfFolderId, templateId) {
     try {
-      log.audit('renderPalletLabelPdf', 'Generating PDF from inline template string for pallet: ' + jsonData.palletName);
+      log.audit('renderPalletLabelPdf', 'Generating PDF from inline template string for pallet: ' + jsonData.palletId);
       
       var renderer = render.create();
       
@@ -802,68 +599,35 @@ define([
         }
       }
       
-      // Get carton count from pallet record's custrecord17 field
+      // Get carton count and SKU/VPN information from custrecord_package_json JSON (already loaded in collectPalletData)
       var cartonCount = 0;
-      if (jsonData.palletId) {
-        try {
-          var palletRecord = record.load({
-            type: 'customrecord_asn_pallet',
-            id: jsonData.palletId,
-            isDynamic: false
-          });
-          var custrecord17Value = palletRecord.getValue('custrecord17') || '';
-          if (custrecord17Value) {
-            try {
-              var cartonData = JSON.parse(custrecord17Value);
-              cartonCount = cartonData.totalCartons || 0;
-            } catch (e) {
-            }
-          } else {
-          }
-        } catch (e) {
-        }
-      } else {
-      }
-      
-      // Get SKU/VPN information from custrecord17 JSON
       var skuDisplayText = '';
-      var cartonDataItems = [];
-      if (jsonData.palletId) {
+      var custrecord17Value = jsonData.custrecord_package_json || '';
+      
+      if (custrecord17Value) {
         try {
-          var palletRecordForSku = record.load({
-            type: 'customrecord_asn_pallet',
-            id: jsonData.palletId,
-            isDynamic: false
-          });
-          var custrecord17ValueForSku = palletRecordForSku.getValue('custrecord17') || '';
-          if (custrecord17ValueForSku) {
-            try {
-              var cartonDataForSku = JSON.parse(custrecord17ValueForSku);
-              cartonDataItems = cartonDataForSku.items || [];
-              
-              if (cartonDataItems.length > 1) {
-                // More than one item = MIXED SKU
-                skuDisplayText = 'MIXED SKU';
-              } else if (cartonDataItems.length === 1) {
-                // Single item - get VPN from the item object (already in JSON)
-                var item = cartonDataItems[0];
-                var vpn = item.vpn || '';
-                skuDisplayText = 'Single ASIN - ' + vpn;
-              } else if (cartonDataItems.length === 0) {
-              }
-            } catch (e) {
-            }
+          var cartonData = JSON.parse(custrecord17Value);
+          cartonCount = cartonData.totalCartons || 0;
+          var cartonDataItems = cartonData.items || [];
+          
+          if (cartonDataItems.length > 1) {
+            // More than one item = MIXED SKU
+            skuDisplayText = 'MIXED SKU';
+          } else if (cartonDataItems.length === 1) {
+            // Single item - get VPN from the item object (already in JSON)
+            var item = cartonDataItems[0];
+            var vpn = item.vpn || '';
+            skuDisplayText = 'Single ASIN - ' + vpn;
           }
         } catch (e) {
+          // Ignore JSON parse errors
         }
       }
       // Build recordData structure
       var recordData = {
         id: jsonData.palletId || '',
-        name: jsonData.palletName || '',
-        custrecord_pallet_index: jsonData.palletNumber || 1,
-        custrecord_total_pallet_count: jsonData.totalPallets || 1,
-        custrecord_items: jsonData.asin || 'ASIN_PLACEHOLDER',
+        custrecord_pallet_index: jsonData.palletNumber,
+        custrecord_total_pallet_count: jsonData.totalPallets,
         cartonCount: cartonCount,
         skuDisplayText: skuDisplayText,
         sscc: jsonData.sscc || '',
@@ -916,14 +680,15 @@ define([
       var pdf = renderer.renderAsPdf();
       pdf.folder = pdfFolderId;
       
-      // File name: PalletLabel_<pallet_name>.pdf
-      var fileName = 'PalletLabel_' + (jsonData.palletName || recordId);
+      // File name: "{ponumber} pallet {pallet index} of {total pallets}.pdf"
+      var poNumber = jsonData.poNumber || '';
+      var palletNumber = jsonData.palletNumber;
+      var totalPallets = jsonData.totalPallets;
+      
+      var fileName = poNumber + ' pallet ' + palletNumber + ' of ' + totalPallets;
       
       // Remove invalid characters for file names
       fileName = fileName.replace(/[<>:"/\\|?*]/g, '_').trim();
-      if (!fileName) {
-        fileName = 'PalletLabel_' + recordId;
-      }
       
       pdf.name = fileName + '.pdf';
       pdf.isOnline = true;
@@ -952,11 +717,7 @@ define([
   }
   
   return {
-    generatePalletLabel: generatePalletLabel,
-    collectPalletData: collectPalletData,
-    collectIFPalletData: collectIFPalletData,
-    renderPalletLabelPdf: renderPalletLabelPdf,
-    formatDate: formatDate
+    generatePalletLabel: generatePalletLabel
   };
 });
 
