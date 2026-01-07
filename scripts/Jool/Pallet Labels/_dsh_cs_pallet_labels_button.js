@@ -40,8 +40,8 @@ define([
       try { processingMsg.show(); } catch (e) {}
       
       var suiteletURL = url.resolveScript({
-        scriptId: 'customscript_dsh_sl_generate_pallet_labels',
-        deploymentId: 'customdeploy_dsh_sl_generate_pallet_labels',
+        scriptId: 'customscript_generate_if_pallet_labels',
+        deploymentId: 'customdeploy_generate_if_pallet_labels',
         returnExternalUrl: false,
         params: { ifid: String(ifId) }
       });

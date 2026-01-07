@@ -22,8 +22,9 @@ define([
   'N/record',
   'N/log',
   'N/runtime',
-  './_dsh_lib_pallet_calculator'
-], function (search, record, log, runtime, palletCalculator) {
+  './_dsh_lib_pallet_calculator',
+  './_dsh_lib_pallet_sscc_generator'
+], function (search, record, log, runtime, palletCalculator, ssccLib) {
   
   // ============================================================================
   // MAIN FUNCTION
@@ -44,8 +45,10 @@ define([
       ifTranId: '',  // Will be set after loading IF
       palletsCreated: 0,
       totalPallets: 0,  // Same as palletsCreated, for clarity
-      palletAssignments: [], // Array of {palletId, packageIds: [], contentIds: [], items: [{itemId, quantity, cartons}], totalCartons: number}
+      palletAssignments: [], // Array of {palletId, packageIds: [], contentIds: [], items: [{itemId, quantity, cartons}], totalCartons: number, sscc: string}
       itemVpnMap: {},  // Map of itemId to VPN
+      itemEdiUomMap: {},  // Map of itemId to EDI UOM
+      itemPoLineMap: {},  // Map of itemId to PO line number
       itemSummary: {}, // Summary by item
       errors: [],
       warnings: []
@@ -92,7 +95,11 @@ define([
       // Step 3: Get UPP (units per pallet) for each item on IF and build VPN map
       var itemUPP = {}; // {itemId: upp}
       var itemNames = {}; // {itemId: itemName}
+      var itemDisplayNames = {}; // {itemId: displayName}
+      var itemDescriptions = {}; // {itemId: description}
       var itemVpnMap = {}; // {itemId: vpn} - Map of itemId to VPN from column field on item list
+      var itemEdiUomMap = {}; // {itemId: ediUom} - Map of itemId to EDI UOM from column field on item list
+      var itemPoLineMap = {}; // {itemId: poLineNumber} - Map of itemId to PO line number from column field on item list
       var lineCount = ifRecord.getLineCount({ sublistId: 'item' });
       
       for (var i = 0; i < lineCount; i++) {
@@ -104,6 +111,14 @@ define([
         
         if (!itemId) continue;
         
+        // Get description from IF line
+        var description = ifRecord.getSublistValue({
+          sublistId: 'item',
+          fieldId: 'description',
+          line: i
+        }) || '';
+        itemDescriptions[itemId] = description;
+        
         // Get VPN from column field on item list (vendorpartnumber)
         var vpn = ifRecord.getSublistValue({
           sublistId: 'item',
@@ -111,10 +126,33 @@ define([
           line: i
         }) || '';
         
+        // Get EDI UOM from column field on item list
+        var ediUom = ifRecord.getSublistValue({
+          sublistId: 'item',
+          fieldId: 'custcol_sps_orderqtyuom',
+          line: i
+        }) || '';
+        
+        // Get PO line number from column field on item list
+        var poLineNumber = ifRecord.getSublistValue({
+          sublistId: 'item',
+          fieldId: 'custcol_sps_linesequencenumber',
+          line: i
+        }) || '';
         
         // Store VPN in map
         if (vpn) {
           itemVpnMap[itemId] = vpn;
+        }
+        
+        // Store EDI UOM in map
+        if (ediUom) {
+          itemEdiUomMap[itemId] = ediUom;
+        }
+        
+        // Store PO line number in map
+        if (poLineNumber) {
+          itemPoLineMap[itemId] = poLineNumber;
         }
         
         // Load item record and get UPP based on location
@@ -136,6 +174,10 @@ define([
           var itemName = itemRecord.getValue('itemid') || itemRecord.getValue('displayname') || itemId;
           itemNames[itemId] = itemName;
           
+          // Get display name
+          var displayName = itemRecord.getValue('displayname') || '';
+          itemDisplayNames[itemId] = displayName;
+          
           // Get UPP using the field determined once per IF
           var upp = itemRecord.getValue(uppFieldId) || 0;
           
@@ -153,10 +195,12 @@ define([
         }
       }
       
-      log.debug('VPN Map Built', 'Built VPN map with ' + Object.keys(itemVpnMap).length + ' item(s)');
+      log.debug('Field Maps Built', 'Built maps - VPN: ' + Object.keys(itemVpnMap).length + ', EDI UOM: ' + Object.keys(itemEdiUomMap).length + ', PO Line: ' + Object.keys(itemPoLineMap).length + ' item(s)');
       
-      // Store VPN map in result
+      // Store maps in result
       result.itemVpnMap = itemVpnMap;
+      result.itemEdiUomMap = itemEdiUomMap;
+      result.itemPoLineMap = itemPoLineMap;
       
       // Step 4: Search all SPS packages for IF
       log.debug('Package Search', 'About to create package search for IF: ' + ifId);
@@ -333,6 +377,19 @@ define([
           palletIds.push(palletId);
           palletAssignments[p].palletId = palletId;
           
+          // Generate and save SSCC immediately after pallet creation
+          var sscc = null;
+          try {
+            sscc = ssccLib.generateAndSaveSSCC(palletId);
+            palletAssignments[p].sscc = sscc;
+            log.debug('SSCC Generated', 'Pallet ' + palletId + ' - SSCC: ' + sscc);
+          } catch (ssccError) {
+            var ssccErrorMsg = 'Failed to generate SSCC for pallet ' + palletId + ': ' + ssccError.toString();
+            log.error('SSCC Generation Error', ssccErrorMsg);
+            result.warnings.push(ssccErrorMsg);
+            // Continue processing - don't fail the whole pallet
+          }
+          
           log.debug('Pallet Created', 'Pallet ' + palletId + ' created with index ' + (p + 1) + ' of ' + totalPallets + ', usage: ' + usagePercentage.toFixed(2) + '%');
         } catch (createError) {
           var errorMsg = 'Failed to create pallet ' + (p + 1) + ': ' + createError.toString();
@@ -352,7 +409,17 @@ define([
       result.totalPallets = palletIds.length;  // Set totalPallets
       result.palletAssignments = palletAssignments;
       
-      // Step 7: Calculate and log summary
+      // Step 7: Build and store pallet JSON on IF to be used by the packing slip template
+      try {
+        buildAndStorePalletJson(ifRecord, palletAssignments, itemNames, itemDisplayNames, itemDescriptions, totalPallets, itemVpnMap, itemEdiUomMap, itemPoLineMap);
+      } catch (jsonError) {
+        var jsonErrorMsg = 'Failed to build/store pallet JSON on IF: ' + jsonError.toString();
+        log.error('Pallet JSON Error', jsonErrorMsg);
+        result.warnings.push(jsonErrorMsg);
+        // Don't fail the whole process - just log the error
+      }
+      
+      // Step 8: Calculate and log summary
       var itemSummary = calculateItemSummary(palletAssignments, packages, itemUPP);
       result.itemSummary = itemSummary;
       
@@ -481,6 +548,88 @@ define([
       }
       
       log.audit('  Total Packages', assignment.packageIds.length.toString());
+    }
+  }
+  
+  /**
+   * Build and store pallet JSON on IF
+   * @param {Object} ifRecord - Item Fulfillment record (already loaded)
+   * @param {Array} palletAssignments - Array of pallet assignments with items and SSCC
+   * @param {Object} itemNames - Map of itemId to itemName
+   * @param {Object} itemDisplayNames - Map of itemId to displayName
+   * @param {Object} itemDescriptions - Map of itemId to description
+   * @param {number} totalPallets - Total number of pallets
+   * @param {Object} itemVpnMap - Map of itemId to VPN
+   * @param {Object} itemEdiUomMap - Map of itemId to EDI UOM
+   * @param {Object} itemPoLineMap - Map of itemId to PO line number
+   */
+  function buildAndStorePalletJson(ifRecord, palletAssignments, itemNames, itemDisplayNames, itemDescriptions, totalPallets, itemVpnMap, itemEdiUomMap, itemPoLineMap) {
+    try {
+      var ifId = ifRecord.id;
+      log.audit('buildAndStorePalletJson', 'Building pallet JSON for IF: ' + ifId);
+      
+      // Build pallets array
+      var pallets = [];
+      
+      for (var p = 0; p < palletAssignments.length; p++) {
+        var assignment = palletAssignments[p];
+        var palletId = assignment.palletId;
+        var palletNumber = p + 1;
+        var sscc = assignment.sscc || '';
+        
+        // Build items array for this pallet with enhanced fields
+        var items = [];
+        if (assignment.items && assignment.items.length > 0) {
+          for (var i = 0; i < assignment.items.length; i++) {
+            var item = assignment.items[i];
+            var itemId = item.itemId;
+            var itemName = itemNames[itemId] || itemId;
+            var displayName = itemDisplayNames[itemId] || '';
+            
+            items.push({
+              itemName: itemName,
+              displayName: displayName,
+              qty: item.quantity || 0,
+              cartons: item.cartons || 0,
+              vpn: itemVpnMap[itemId] || '',
+              ediUom: itemEdiUomMap[itemId] || '',
+              poLineNumber: itemPoLineMap[itemId] || ''
+            });
+          }
+        }
+        
+        pallets.push({
+          palletNumber: palletNumber,
+          palletId: palletId,
+          sscc: sscc,
+          items: items
+        });
+      }
+      
+      // Build final JSON structure
+      var palletJson = {
+        totalPallets: totalPallets,
+        pallets: pallets
+      };
+      
+      var jsonString = JSON.stringify(palletJson);
+      
+      // Store on IF (using the already loaded record)
+      ifRecord.setValue({
+        fieldId: 'custbody_pallet_json',
+        value: jsonString
+      });
+      
+      ifRecord.save({
+        enableSourcing: false,
+        ignoreMandatoryFields: true
+      });
+      
+      log.audit('buildAndStorePalletJson', 'Successfully stored pallet JSON on IF: ' + ifId + ' (' + pallets.length + ' pallets)');
+      
+    } catch (error) {
+      log.error('buildAndStorePalletJson Error', error);
+      throw error;
     }
   }
   

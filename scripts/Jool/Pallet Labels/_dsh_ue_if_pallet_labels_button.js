@@ -6,7 +6,7 @@
  * User Event Script to add "Generate Pallet Labels" button on Item Fulfillment record.
  */
 
-define(['N/record', 'N/log'], function (record, log) {
+define(['N/record', 'N/log'], function (record, log) {9
   
   function beforeLoad(context) {
     try {
@@ -19,7 +19,7 @@ define(['N/record', 'N/log'], function (record, log) {
       var form = context.form;
       
       // Set client script module path BEFORE adding button
-      form.clientScriptModulePath = './_dsh_cs_pallet_labels_button.js';
+      form.clientScriptModulePath = './_dsh_cs_print_pallets_button.js';
       
       // Add button with function call including record ID
       form.addButton({

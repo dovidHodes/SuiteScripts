@@ -17,11 +17,7 @@ define([
   './_dsh_lib_pdf_merger'
 ], function (record, search, log, url, palletLabelLib, pdfMerger) {
   
-  // Configuration constants
-  var PALLET_RECORD_TYPE = 'customrecord_asn_pallet';
-  var PALLET_IF_FIELD = 'custrecord_parent_if';
   var PDF_FOLDER_ID = 2122;
-  var MERGED_LABELS_FIELD = 'custbody_merged_pallet_labels';
   
   /**
    * Handles HTTP requests
@@ -35,22 +31,12 @@ define([
       
       log.debug('onRequest', 'Request method: ' + request.method);
       log.debug('onRequest', 'Request parameters: ' + JSON.stringify(request.parameters));
-      
-      if (request.method !== 'GET') {
-        response.write({
-          output: JSON.stringify({
-            success: false,
-            error: 'Only GET method is supported'
-          })
-        });
-        return;
-      }
+    
       
       var ifId = request.parameters.ifid;
       var shouldRedirect = request.parameters.redirect === 'T' || request.parameters.redirect === 'true';
       
       log.debug('onRequest', 'Extracted IF ID: ' + ifId);
-      log.debug('onRequest', 'Redirect flag: ' + shouldRedirect);
       
       if (!ifId) {
         log.error('onRequest', 'Missing Item Fulfillment ID in request parameters');
@@ -101,11 +87,11 @@ define([
       log.debug('onRequest', 'IF TranID: ' + ifTranId + ', PO: ' + poNumber + ', Location: ' + locationName);
       
       // Search for all pallets related to this IF
-      log.debug('onRequest', 'Searching for pallets where ' + PALLET_IF_FIELD + ' = ' + ifId);
+      log.debug('onRequest', 'Searching for pallets where custrecord_parent_if = ' + ifId);
       var palletSearch = search.create({
-        type: PALLET_RECORD_TYPE,
+        type: 'customrecord_asn_pallet',
         filters: [
-          [PALLET_IF_FIELD, 'anyof', ifId]
+          ['custrecord_parent_if', 'anyof', ifId]
         ],
         columns: [
           search.createColumn({ name: 'internalid' })

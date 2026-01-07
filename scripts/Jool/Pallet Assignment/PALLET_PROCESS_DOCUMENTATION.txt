@@ -1,0 +1,363 @@
+PALLET PROCESS DOCUMENTATION 
+
+The pallet process automatically creates pallets for Item Fulfillments and assigns SPS packages to those pallets. The process runs in two main ways: automatically via scheduled script, or manually via Suitelet. 
+
+  
+
+CHRONOLOGICAL PROCESS FLOW 
+
+  
+
+1. TRIGGER: Scheduled Script (_dsh_sch_pallet_planner.js) 
+
+   - Runs on schedule (typically hourly or daily)
+   - Searches for Item Fulfillments that meet criteria:
+     - Entity has custentity_auto_create_pallets = true
+     - custbody_pallets_created_and_requested = false
+     - custbody_request_type = 1 (pallet type routing)
+     - custbody_sps_package_notes contains "created"
+     - custbody_requested_autopack = true
+     - trandate on or after November 1, 2025
+   - Finds up to 50 IFs per run
+   - Submits IF IDs to Planner Map/Reduce script
+2. PLANNER MAP/REDUCE (_dsh_mr_pallet_planner.js) 
+
+   - Receives up to 50 IF IDs from scheduler
+   - Splits IFs into chunks of 5
+   - For each chunk:
+     - Calls library to create pallets for all IFs in chunk
+     - Submits all IFs together to Package Assigner MR
+3. LIBRARY SCRIPT (_dsh_lib_create_and_link_pallets.js) 
+
+   - Gets IF location
+   - Loads item records and gets UPP (units per pallet) based on location
+   - Searches SPS packages and package content
+   - Calculates optimal pallet assignments (minimize pallets, items can share)
+   - Creates pallet records in NetSuite
+   - Returns assignment data for Package Assigner MR
+4. PACKAGE ASSIGNER MAP/REDUCE (_dsh_mr_assign_pallets.js) 
+
+   - Receives pallet assignment data from library
+   - Updates packages with pallet IDs
+   - Updates package content records with pallet IDs
+   - Sets package JSON field on pallet for Jitterbit ASN use
+ALTERNATIVE MANUAL PROCESS 
+
+  
+
+TRIGGER: Suitelet (_dsh_sl_assign_pallets.js) 
+
+   - Can be called manually with IF ID parameter (ifid)
+   - Calls library to create pallets
+   - Submits Package Assigner MR for that single IF
+   - Returns JSON result
+PALLET LABEL PRINTING PROCESS 
+
+The pallet label printing process generates PDF labels for pallets and merges them into a single PDF per Item Fulfillment. The process runs automatically via Map/Reduce script, or manually via Suitelet button on the IF record. 
+
+  
+
+CHRONOLOGICAL PROCESS FLOW 
+
+  
+
+1. TRIGGER: Batch Map/Reduce (_dsh_mr_batch_pallet_labels.js) 
+
+   - Runs on schedule ()
+   - Searches for Item Fulfillments that meet criteria:
+     - Entity has custentity_print_pallet_labels = true
+     - custbody_completed_pallet_population = true (pallets assigned)
+     - custbody_requested_pallet_labels = false (not yet requested)
+     - custbody_routing_status = 3 (routing received)
+     - custbody_request_type = 1 (pallet type routing)
+     - custbody_sps_carrieralphacode is not AMZX
+   - Finds all pallets for matching IFs
+   - Generates labels for each pallet in map stage
+   - Merges all labels per IF in reduce stage
+   - Attaches merged PDF to IF and sets URL field
+2. LABEL GENERATOR LIBRARY (_dsh_lib_pallet_label_generator.js) 
+
+   - Generates individual pallet label PDFs
+   - Uses template from _dsh_lib_pallet_label_template.js
+   - Includes pallet data, barcodes, and formatting
+3. PDF MERGER LIBRARY (_dsh_lib_pdf_merger.js) 
+
+   - Merges multiple pallet label PDFs into single PDF
+   - Attaches merged PDF to Item Fulfillment record
+   - Sets URL field on IF for easy access
+ALTERNATIVE MANUAL PROCESS 
+
+  
+
+TRIGGER: User Event Script (_dsh_ue_if_pallet_labels_button.js) 
+
+   - Adds "Generate Pallet Labels" button to IF record view
+   - Button calls Client Script function
+CLIENT SCRIPT (_dsh_cs_pallet_labels_button.js) 
+
+   - Handles button click on IF record
+   - Calls Suitelet with IF ID parameter
+SUITELET (_dsh_sl_generate_pallet_labels.js) 
+
+   - Can be called manually with IF ID parameter (ifid)
+   - Searches for all pallets related to IF
+   - Generates labels for each pallet
+   - Merges all labels into single PDF
+   - Attaches PDF to IF and redirects to view file
+   - Returns JSON result if redirect not requested
+PACKING SLIP GENERATION 
+
+The packing slip generation process creates PDF packing slips for Item Fulfillments with pallet-level detail. 
+
+CHRONOLOGICAL PROCESS FLOW 
+
+TRIGGER: Suitelet (_dsh_sl_generate_packing_slip.js) 
+
+   - Can be called manually with IF ID parameter (ifid)
+   - Generates PDF using Advanced PDF/HTML template (ID: 223)
+   - Includes pallet information and QR code for SMS
+   - Attaches PDF to IF record
+   - Redirects to view file or returns JSON result
+BILL OF LADING (BOL) GENERATION 
+
+The BOL generation process creates Bill of Lading PDFs for Item Fulfillments. The process runs automatically via Map/Reduce script, or manually via Suitelet button on the IF record. 
+
+CHRONOLOGICAL PROCESS FLOW 
+
+1. TRIGGER: Batch Map/Reduce (_dsh_mr_generate_and_attach_bols.js) 
+
+   - Runs on schedule
+   - Searches for Item Fulfillments that meet criteria:
+     - Entity has custentity_generate_and_attach_bols = true
+     - SCAC code is NOT in customer's custentity_dont_generate_bols field
+   - Generates BOL PDF for each IF
+   - Attaches BOL to IF record
+2. BOL GENERATOR LIBRARY (_dsh_lib_bol_generator.js) 
+
+   - Generates BOL PDF using template
+   - Includes carrier information and shipping details
+ALTERNATIVE MANUAL PROCESS 
+
+TRIGGER: User Event Script (_dsh_ue_if_bol_button.js) 
+
+   - Adds "Generate BOL" button to IF record view
+   - Button calls Client Script function
+CLIENT SCRIPT (_dsh_cs_single_bol_button.js) 
+
+   - Handles button click on IF record
+   - Calls Suitelet with IF ID parameter
+SUITELET (_dsh_sl_single_bol_generate.js) 
+
+   - Can be called manually with IF ID parameter (ifid)
+   - Generates BOL PDF
+   - Attaches PDF to IF and redirects to view file
+INTEGRATED SHIPPING LABELS 
+
+The integrated shipping labels process creates shipping labels for Item Fulfillments. The process runs automatically via scheduled script and Map/Reduce, or manually via Suitelet button on the IF record. 
+
+CHRONOLOGICAL PROCESS FLOW 
+
+1. TRIGGER: Scheduled Script (_dsh_sch_integrated_shipping_labels.js) 
+
+   - Runs on schedule
+   - Searches for Item Fulfillments that meet criteria:
+     - Entity has custentity_create_packages_integrated = true
+     - If entity has custentity_needs_routing = true, only when custbody_routing_status = 3 (routing received)
+     - SCAC must be in custentity_is_small_parcel list
+     - custbody_requested_integrated_packages = false
+   - Sets custbody_requested_integrated_packages = true
+   - Submits IF IDs to Integrated Shipping Labels Map/Reduce
+2. INTEGRATED SHIPPING LABELS MAP/REDUCE (_dsh_mr_integrated_shipping_labels.js) 
+
+   - Receives IF IDs from scheduler
+   - Creates integrated shipping labels for packages
+   - Attaches labels to IF records
+ALTERNATIVE MANUAL PROCESS 
+
+TRIGGER: User Event Script (_dsh_ue_if_integrated_labels_button.js) 
+
+   - Adds "Generate Integrated Labels" button to IF record view
+   - Button calls Client Script function
+CLIENT SCRIPT (_dsh_cs_integrated_labels_button.js) 
+
+   - Handles button click on IF record
+   - Calls Suitelet with IF ID parameter
+SUITELET (_dsh_sl_integrated_shipping_labels.js) 
+
+   - Can be called manually with IF ID parameter (ifid)
+   - Generates integrated shipping labels
+   - Attaches labels to IF record
+BATCH PRINT LABELS 
+
+The batch print labels process schedules SPS batch label printing for Item Fulfillments. 
+
+CHRONOLOGICAL PROCESS FLOW 
+
+1. TRIGGER: Scheduled Script (_dsh_sch_batch_print_labels.js) 
+
+   - Runs on schedule
+   - Searches for Item Fulfillments that meet criteria:
+     - Entity has custentity_auto_batch_print = true
+     - custbody_requested_batch_print = false
+     - custbody_sps_batched_print_com = false
+     - custbody_routing_status = 3 (routing received)
+     - custbody_requested_bol = true (BOL must be requested first)
+   - Sets custbody_requested_batch_print = true
+   - Submits IF IDs to SPS batch label Map/Reduce script
+2. SPS BATCH LABEL MAP/REDUCE (sps_mr_batch_labels.js) 
+
+   - Receives IF IDs from scheduler
+   - Generates shipping labels via SPS API
+   - Attaches labels to IF records
+BATCH MERGE LABELS 
+
+The batch merge labels process consolidates multiple label PDFs into a single merged PDF per Item Fulfillment. 
+
+CHRONOLOGICAL PROCESS FLOW 
+
+1. TRIGGER: Scheduled Script (_dsh_sch_batch_and_attach.js) 
+
+   - Runs on schedule
+   - Searches for Item Fulfillments with multiple label PDFs
+   - Submits IF IDs to Merge Labels Map/Reduce
+2. MERGE LABELS MAP/REDUCE (_dsh_mr_merge_labels.js) 
+
+   - Receives IF IDs from scheduler
+   - Finds all label PDFs attached to each IF
+   - Merges PDFs into single file
+   - Attaches merged PDF to IF and sets URL field
+ALTERNATIVE MANUAL PROCESS 
+
+TRIGGER: User Event Script (_dsh_ue_if_merge_labels.js) 
+
+   - Adds "Merge Labels" button to IF record view
+   - Button triggers merge process for that IF
+SPS AUTOPACK 
+
+The SPS autopack process automatically creates packages for Item Fulfillments based on packing rules. 
+
+CHRONOLOGICAL PROCESS FLOW 
+
+1. TRIGGER: Scheduled Script (autopackScheduled.js) 
+
+   - Runs on schedule
+   - Searches for Item Fulfillments that meet criteria:
+     - Entity has custentity_auto_create_packages = true
+     - custbody_requested_autopack = false
+     - Created date after November 1, 2025
+   - Sets custbody_requested_autopack = true
+   - Submits IF IDs to SPS Autopack Map/Reduce script
+2. SPS AUTOPACK MAP/REDUCE (sps_mr_auto_pack_2x.js) 
+
+   - Receives IF IDs from scheduler
+   - Uses packing rules to create packages
+   - Assigns items to packages based on carton counts and lot numbers
+   - Creates SPS package records
+CREATE ITEM FULFILLMENTS 
+
+The create IFs process automatically creates Item Fulfillments from Sales Orders. 
+
+CHRONOLOGICAL PROCESS FLOW 
+
+1. TRIGGER: Map/Reduce Script (autoIF.js) 
+
+   - Runs on schedule
+   - Searches for Sales Orders that meet criteria:
+     - Entity has custentity_auto_create_ifs = true
+     - custbody_sent_po_ack = true
+     - custbody_ifs_created = false
+   - Groups by location
+   - Creates Item Fulfillment records for each location
+   - Sets custbody_ifs_created = true on Sales Order
+   - Calculates and applies routing fields
+CALCULATE AND SET ROUTING 
+
+The routing calculation process determines and applies routing information to Item Fulfillments. 
+
+CHRONOLOGICAL PROCESS FLOW 
+
+TRIGGER: Suitelet (_dsh_sl_calculate_routing.js) 
+
+   - Can be called manually with IF ID parameter (ifid)
+   - Uses routing calculator library
+   - Calculates routing fields based on IF data
+   - Applies routing status and related fields to IF
+ALTERNATIVE MANUAL PROCESS 
+
+TRIGGER: User Event Script (setAVCroutingIF_UE.js) 
+
+   - Automatically calculates routing on IF save
+   - Uses routing calculator library
+ADD PACKAGES TO IF 
+
+The add packages process programmatically adds packages with weight and dimensions to Item Fulfillment records. 
+
+CHRONOLOGICAL PROCESS FLOW 
+
+1. TRIGGER: Map/Reduce Script (_dsh_mr_add_packages.js) 
+
+   - Searches for Item Fulfillments (customize filters as needed)
+   - Adds packages to package sublist with weight and dimensions
+   - Saves updated IF records
+ADD PACKAGES LIBRARY (_dsh_lib_add_packages.js) 
+
+   - Contains logic for adding packages to IF sublist
+   - Sets packageweight, packagelength, packagewidth, packageheight
+APPROVE AVC ORDERS 
+
+The approve AVC orders process automatically approves Sales Orders for Amazon Vendor Central based on warehouse buffer stock. 
+
+CHRONOLOGICAL PROCESS FLOW 
+
+TRIGGER: User Event Script (setAndApproveAVCOrders.js) 
+
+   - Runs on Sales Order beforeSubmit
+   - Only processes entity 1716 (Amazon Vendor Central)
+   - Checks warehouse buffer stock for each line item
+   - Sets approval status based on available inventory
+   - Adds notes explaining approval decisions
+NOTIFICATIONS 
+
+The notifications process sends email alerts for routing issues and missing routing information. 
+
+CHRONOLOGICAL PROCESS FLOW 
+
+1. ROUTING ERROR NOTIFICATION (_dsh_sch_routing_error_notification.js) 
+
+   - Runs on schedule
+   - Searches for Item Fulfillments with routing status 4 (routing error)
+   - Finds IFs with custbody_routing_request_issue field populated
+   - Sends single email with list of all problematic IFs
+   - Includes entity names, IF tranids with links, and error messages
+2. ROUTING NOT RECEIVED NOTIFICATION (_dsh_sch_routing_not_received_notification.js) 
+
+   - Runs on schedule
+   - Searches for Item Fulfillments with routing status 2 (routing requested but not received)
+   - Finds IFs where MABD date is within 2 business days
+   - Sends email notification with list of IFs needing attention
+   - Includes entity names and IF tranids with links
+PALLET VOLUME DISPLAY 
+
+The pallet volume display process shows visual percentage indicator for pallet capacity on pallet records. 
+
+CHRONOLOGICAL PROCESS FLOW 
+
+TRIGGER: User Event Script (_dsh_ue_pallet_volume_display.js) 
+
+   - Runs on pallet record beforeLoad (view mode only)
+   - Reads custrecord_percentage field
+   - Displays color-coded gradient bar showing pallet capacity
+   - Green (95%+), Blue (90-94%), Yellow (70-89%), Red (<70%)
+NOTES 
+
+- Process handles up to 50 IFs per scheduled run
+- IFs are processed in chunks of 5 in the Planner MR
+- Each chunk uses different MR deployment (customdeploy10-19)
+- Process sets flag custbody_pallets_created_and_requested to prevent duplicate processing
+- Pallet label process sets flag custbody_requested_pallet_labels to prevent duplicate label generation
+- BOL process checks SCAC code against customer exclusion list
+- Integrated labels only process for small parcel carriers
+- Batch print requires BOL to be generated first
+- Autopack uses packing rules based on item properties and carton counts
+- Create IFs groups by location and creates separate IF per location
+- Routing calculation uses library for shared logic across multiple scripts

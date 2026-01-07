@@ -25,14 +25,14 @@
                         <span class="nameandaddress">${companyInformation.companyName}</span><br />
                         <span class="nameandaddress">${companyInformation.addressText}</span>
                     </td>
-                    <td align="right"><span class="title">${record@title}</span></td>
+                    <td align="right"><span class="title">Pallet Packing List</span></td>
                 </tr>
                 <tr>
-                    <td align="right"><span class="number">#${record.tranid}</span></td>
+                    <td align="right"><span class="number"><b>PO: ${record.custbody_sps_ponum_from_salesorder!""}</b></span></td>
                 </tr>
                 <tr>
-                    <td align="right">${record.trandate}</td>
-                </tr>
+                    <td align="right">IF: ${record.tranid}</td>
+                </tr> 
             </table>
         </macro>
         <macro id="nlfooter">
@@ -40,7 +40,11 @@
                 <tr>
                 <#if preferences.PRINT_BARCODES>
                     <td>
-                        <barcode codetype="code128" showtext="true" value="${record.tranid}"/>
+                        <barcode
+                          codetype="qrcode"
+                          value="SMSTO:+18623743179:Hi David, I've found this easter egg!"
+                          height="25"
+                        />
                     </td>
                 </#if>
                     <td align="right">
@@ -49,7 +53,7 @@
                 </tr>
                 <tr>
                     <td colspan="2" align="right" style="font-size: 6pt; color: #a7bbd5;">
-                        <a href="https://www.youtube.com/watch?v=xvFZjo5PgG0&amp;list=RDxvFZjo5PgG0&amp;start_radio=1" style="color: #a7bbd5; text-decoration: none;">Designed by Dovid Hodes</a>
+                        <a href="https://www.youtube.com/watch?v=xvFZjo5PgG0&amp;list=RDxvFZjo5PgG0&amp;start_radio=1" style="color: #a7bbd5; text-decoration: none;">Built by Dovid Hodes</a>
                     </td>
                 </tr>
             </table>
@@ -80,7 +84,7 @@
             font-size: 8pt;
             vertical-align: middle;
             padding: 5px 6px 3px;
-            background-color: #e3e3e3;
+            background-color: #ffffff;
             color: #333333;
         }
         td {
@@ -99,12 +103,43 @@
             padding: 0;
             font-size: 8pt;
         }
+        table.itemtable {
+            border-collapse: collapse;
+        }
         table.itemtable th {
             padding-bottom: 10px;
             padding-top: 10px;
+            background-color: #ffffff;
+        }
+        table.itemtable thead tr {
+            border: 1px solid #808080;
+        }
+        table.itemtable thead tr th {
+            border: none;
+        }
+        table.itemtable thead tr th:first-child {
+            border-left: 1px solid #808080;
+        }
+        table.itemtable thead tr th:last-child {
+            border-right: 1px solid #808080;
+        }
+        table.body {
+            border-collapse: collapse;
         }
         table.body td {
             padding-top: 2px;
+        }
+        table.body tr:first-child {
+            border: 1px solid #808080;
+        }
+        table.body tr:first-child th {
+            border: none;
+        }
+        table.body tr:first-child th:first-child {
+            border-left: 1px solid #808080;
+        }
+        table.body tr:first-child th:last-child {
+            border-right: 1px solid #808080;
         }
         td.addressheader {
             font-size: 8pt;
@@ -139,6 +174,13 @@
             background-color: #ffffff;
             height: 1px;
         }
+        th.palletheader {
+            background-color: #ffffff;
+            border: 1px solid #808080;
+            font-size: 10pt;
+            padding: 8px;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body header="nlheader" header-height="10%" footer="nlfooter" footer-height="20pt" padding="0.5in 0.5in 0.5in 0.5in" size="Letter">
@@ -150,26 +192,51 @@
             <td class="address">${salesorder.shipaddress}</td>
         </tr>
     </table>
-    <table class="body" style="width: 100%; margin-top: 10px;">
-        <tr>
-            <th>${record.trandate@label}</th>
-            <th>${salesorder.linkedtrackingnumbers@label}</th>
-            <th>${record.shipmethod@label}</th>
-            <th>${record.shipphone@label}</th>
+    <table class="body" style="width: 100%; margin-top: 10px; border-collapse: collapse;">
+        <tr style="border: 1px solid #808080;">
+            <th style="border: none; border-left: 1px solid #808080;">IF Date:</th>
+            <th style="border: none;">PO Date</th>
+            <th style="border: none; border-right: 1px solid #808080;">Customer</th>
         </tr>
         <tr>
             <td>${record.trandate}</td>
-            <td>${salesorder.linkedtrackingnumbers}</td>
-            <td>${record.shipmethod}</td>
-            <td>${record.shipphone}</td>
+            <td>${record.custbody_sps_purchaseorderdate}</td>
+            <td>${custom.entityName!""}</td>
         </tr>
     </table>
+    <#-- Display items grouped by pallet from custom data source -->
+    <#if pallets.pallets?has_content>
+    <#list pallets.pallets as pallet>
+    <table class="itemtable" style="width: 100%; margin-top: 10px;">
+        <thead>
+        <tr>
+            <th colspan="16">${salesorder.item[0].item@label} Pallet ${pallet.palletNumber}<#if pallet.totalPallets?has_content> of ${pallet.totalPallets}</#if></th>
+            <th align="right" colspan="4">${salesorder.item[0].quantityordered@label}</th>
+            <th align="right" colspan="4">Cartons</th>
+            <th align="right" colspan="4">${salesorder.item[0].quantityremaining@label}</th>
+            <th align="right" colspan="4">Quantity</th>
+        </tr>
+        </thead>
+        <#if pallet.items?has_content>
+        <#list pallet.items as item>
+            <tr>
+                <td colspan="16"><span class="itemname">${item.itemName!""?xml}<#if item.displayName?has_content && item.displayName != item.itemName> • ${item.displayName?xml}</#if></span></td>
+                <td align="right" colspan="4"></td>
+                <td align="right" colspan="4">${item.cartons!0}</td>
+                <td align="right" colspan="4"></td>
+                <td align="right" colspan="4">${item.qty!0}</td>
+            </tr>
+        </#list>
+        </#if>
+    </table>
+    </#list>
+    <#else>
+    <#-- Fallback: show standard items if no pallet data -->
     <#if salesorder.item?has_content>
     <table class="itemtable" style="width: 100%; margin-top: 10px;">
         <thead>
         <tr>
-            <th colspan="12">${salesorder.item[0].item@label}</th>
-            <th colspan="3">${salesorder.item[0].options@label}</th>
+            <th colspan="16">${salesorder.item[0].item@label}</th>
             <th align="right" colspan="4">${salesorder.item[0].quantityordered@label}</th>
             <th align="right" colspan="4">Cartons</th>
             <th align="right" colspan="4">${salesorder.item[0].quantityremaining@label}</th>
@@ -178,8 +245,7 @@
         </thead>
         <#list salesorder.item as tranline>
             <tr>
-                <td colspan="12"><span class="itemname">${tranline.item}</span><br />${tranline.description}</td>
-                <td colspan="3">${tranline.options}</td>
+                <td colspan="16"><span class="itemname">${tranline.item}</span></td>
                 <td align="right" colspan="4">${tranline.quantityordered}</td>
                 <td align="right" colspan="4">${tranline.custcol_calculated_cartons_per_line}</td>
                 <td align="right" colspan="4">${tranline.quantityremaining}</td>
@@ -188,7 +254,8 @@
         </#list>
     </table>
     </#if>
-    <#if preferences.RETURNFORM && returnForm??>
+    </#if>
+    <#if preferences.RETURNFORM &amp;&amp; returnForm??>
     <hr />
     <div class="returnform">
         <table style="width: 100%; margin-top: 10px;">
@@ -202,7 +269,7 @@
                 <td class="addressheader" colspan="4">${returnForm.returnAddress}</td>
                 <th>${returnForm.rmaNum}</th>
                 <th colspan="2">${returnForm.customerName}</th>
-                <th>${salesorder.tranid@label}</th>9
+                <th>${salesorder.tranid@label}</th>
             </tr>
             <tr>
                 <td class="address" colspan="4" rowspan="2">&nbsp;</td>
@@ -229,5 +296,3 @@
     </div></#if>
 </body>
 </pdf>
-
-

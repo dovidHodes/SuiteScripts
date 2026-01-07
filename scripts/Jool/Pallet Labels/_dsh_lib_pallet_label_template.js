@@ -124,6 +124,13 @@ define([], function () {
 '                box-sizing: border-box;\n' +
 '            }\n' +
 '            \n' +
+'            .full-width-box.header-box {\n' +
+'                border: 1px solid #808080;\n' +
+'                background-color: #ffffff;\n' +
+'                border-bottom: 1px solid #808080;\n' +
+'            }\n' +
+'            \n' +
+'            \n' +
 '            .carrier-info {\n' +
 '                font-size: 9pt;\n' +
 '                padding: 0;\n' +
@@ -288,17 +295,17 @@ define([], function () {
 '                        </table>\n' +
 '            \n' +
 '            <!-- New Full-Width Box -->\n' +
-'            <div class="full-width-box">\n' +
+'            <div class="full-width-box header-box">\n' +
 '                <table style="width: 100%; border-collapse: collapse; padding: 5px;">\n' +
 '                    <tr>\n' +
-'                        <td style="padding: 5px; text-align: left; font-size: 11pt; width: 50%;">Pallet ${record.custrecord_pallet_index!1} of ${record.custrecord_total_pallet_count!1}</td>\n' +
+'                        <td style="padding: 5px; text-align: left; font-size: 11pt; width: 50%; padding-left: 2px;">Pallet ${record.custrecord_pallet_index!1} of ${record.custrecord_total_pallet_count!1}</td>\n' +
 '                        <td style="padding: 5px; text-align: right; font-size: 11pt; width: 50%;">Cartons on pallet: ${record.cartonCount!0}</td>\n' +
 '                    </tr>\n' +
 '                </table>\n' +
 '            </div>\n' +
 '            \n' +
 '            <!-- New Full-Width Box 2 (Twice as tall) -->\n' +
-'            <div class="full-width-box" style="min-height: 65px; padding-left: 65px; padding-right: 65px;">\n' +
+'            <div class="full-width-box" style="min-height: 65px; padding-left: 10px; padding-right: 65px;">\n' +
 '                <table style="width: 100%; border-collapse: collapse; padding: 5px;">\n' +
 '                    <tr>\n' +
 '                        <td style="padding: 5px; text-align: center; vertical-align: middle; font-size: 24pt; font-weight: normal; color: #000000;">${record.skuDisplayText!""}</td>\n' +

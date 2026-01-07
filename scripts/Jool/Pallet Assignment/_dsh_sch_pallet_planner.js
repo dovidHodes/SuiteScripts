@@ -8,6 +8,7 @@
  * - Entity has custentity_auto_create_pallets = true
  * - custbody_pallets_created_and_requested = false (not yet processed)
  * - custbody_request_type = 1 (pallet type routing request)
+ * - custbody_routing_status = 3 (routing received)
  * - custbody_sps_package_notes contains "created"
  * - custbody_requested_autopack = true
  * - trandate on or after November 1, 2025 (hardcoded date: 11/01/2025)
@@ -83,6 +84,8 @@ define([
         ['custbody_pallets_created_and_requested', 'is', 'F'],
         'AND',
         ['custbody_request_type', 'is', 1],  // Pallet type (numeric, not string)
+        'AND',
+        ['custbody_routing_status', 'is', 3],  // Routing received
         'AND',
         ['trandate', search.Operator.ONORAFTER, cutoffDateStr]  // After 11/01/2025 (MM/DD/YYYY string format)
       ],

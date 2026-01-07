@@ -16,9 +16,8 @@
 define([
   'N/record',
   'N/log',
-  'N/runtime',
-  './_dsh_lib_pallet_sscc_generator'
-], function (record, log, runtime, ssccLib) {
+  'N/runtime'
+], function (record, log, runtime) {
   
   // Configuration constants
   var PALLET_RECORD_TYPE = 'customrecord_asn_pallet';
@@ -190,17 +189,6 @@ define([
       var totalPallets = assignment.totalPallets || 1;
       
       var errors = [];
-      
-      // Generate and save SSCC for this pallet
-      var sscc = null;
-      try {
-        sscc = ssccLib.generateAndSaveSSCC(palletId);
-      } catch (ssccError) {
-        var ssccErrorMsg = 'Failed to generate SSCC: ' + ssccError.toString();
-        log.error('reduce', ssccErrorMsg);
-        errors.push(ssccErrorMsg);
-        // Continue processing - don't fail the whole pallet
-      }
       
       // Create JSON for pallet with items (including VPN) and total cartons
       var palletJson = {
