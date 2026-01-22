@@ -112,20 +112,24 @@ define([
    * @param {Array<string>} fileIds - Array of file internal IDs to merge
    * @param {string} fileName - Name for the merged PDF file
    * @param {number} folderId - File cabinet folder ID (optional)
+   * @param {boolean} duplicatePages - If true, duplicate each page (for pallet labels - one per side)
    * @returns {Object} {success: true/false, fileId: string, pdfUrl: string, error: string}
    */
-  function mergePDFs(fileIds, fileName, folderId) {
+  function mergePDFs(fileIds, fileName, folderId, duplicatePages) {
     try {
       if (!fileIds || fileIds.length === 0) {
         return { success: false, error: 'No file IDs provided' };
       }
+      
+      // Default duplicatePages to false for backward compatibility
+      duplicatePages = duplicatePages === true;
       
       if (!PDFLib || typeof PDFLib.PDFDocument === 'undefined') {
         log.error('mergePDFs', 'PDFlib not loaded correctly');
         return { success: false, error: 'PDFlib not loaded' };
       }
       
-      log.debug('mergePDFs', 'Starting to merge ' + fileIds.length + ' PDF file(s)');
+      log.debug('mergePDFs', 'Starting to merge ' + fileIds.length + ' PDF file(s)' + (duplicatePages ? ' (with page duplication)' : ''));
       
       // Sanitize filename
       if (fileName) {
@@ -173,7 +177,7 @@ define([
         }
         
         // Process PDFs sequentially
-        return processPDFs(loadPromises, mergedPdfDoc);
+        return processPDFs(loadPromises, mergedPdfDoc, duplicatePages);
         
       }).then(function(mergedPdfDoc) {
         log.debug('mergePDFs', 'All PDFs processed, saving merged document');
@@ -224,9 +228,10 @@ define([
    * Processes PDFs sequentially to merge them into the target document
    * @param {Array<Promise>} loadPromises - Array of PDF loading promises
    * @param {Object} mergedPdfDoc - The target PDF document to merge into
+   * @param {boolean} duplicatePages - If true, duplicate each page
    * @returns {Promise} Promise that resolves when all PDFs are merged
    */
-  function processPDFs(loadPromises, mergedPdfDoc) {
+  function processPDFs(loadPromises, mergedPdfDoc, duplicatePages) {
     if (loadPromises.length === 0) {
       return Promise.resolve(mergedPdfDoc);
     }
@@ -236,7 +241,7 @@ define([
       log.debug('processPDFs', 'PDF has ' + pageCount + ' page(s)');
       
       if (pageCount === 0) {
-        return processPDFs(loadPromises.slice(1), mergedPdfDoc);
+        return processPDFs(loadPromises.slice(1), mergedPdfDoc, duplicatePages);
       }
       
       // Build array of all page indices
@@ -245,54 +250,133 @@ define([
         pageIndices.push(i);
       }
       
-      // Copy pages (returns Promise or direct result)
-      var copyResult = mergedPdfDoc.copyPages(sourcePdfDoc, pageIndices);
-      var copyPromise = (copyResult && typeof copyResult.then === 'function') 
-        ? copyResult 
-        : Promise.resolve(copyResult);
-      
-      return copyPromise.then(function(copiedPages) {
-        // Handle different return types from copyPages
-        var pages = [];
-        if (Array.isArray(copiedPages)) {
-          pages = copiedPages;
-        } else if (copiedPages && typeof copiedPages.length !== 'undefined') {
-          // Array-like object
-          for (var j = 0; j < copiedPages.length; j++) {
-            if (copiedPages[j] !== undefined && copiedPages[j] !== null) {
-              pages.push(copiedPages[j]);
+      if (duplicatePages) {
+        // Copy pages TWICE - once for original, once for duplicate (warehouse needs one on each side of pallet)
+        var copyResult1 = mergedPdfDoc.copyPages(sourcePdfDoc, pageIndices);
+        var copyPromise1 = (copyResult1 && typeof copyResult1.then === 'function') 
+          ? copyResult1 
+          : Promise.resolve(copyResult1);
+        
+        // Copy pages again for the duplicate
+        var copyResult2 = mergedPdfDoc.copyPages(sourcePdfDoc, pageIndices);
+        var copyPromise2 = (copyResult2 && typeof copyResult2.then === 'function') 
+          ? copyResult2 
+          : Promise.resolve(copyResult2);
+        
+        // Wait for both copies to complete
+        return Promise.all([copyPromise1, copyPromise2]).then(function(results) {
+          var copiedPages1 = results[0];
+          var copiedPages2 = results[1];
+          
+          // Handle different return types from copyPages - first copy
+          var pages1 = [];
+          if (Array.isArray(copiedPages1)) {
+            pages1 = copiedPages1;
+          } else if (copiedPages1 && typeof copiedPages1.length !== 'undefined') {
+            for (var j = 0; j < copiedPages1.length; j++) {
+              if (copiedPages1[j] !== undefined && copiedPages1[j] !== null) {
+                pages1.push(copiedPages1[j]);
+              }
+            }
+          } else if (copiedPages1) {
+            pages1 = [copiedPages1];
+          }
+          
+          // Handle different return types from copyPages - second copy
+          var pages2 = [];
+          if (Array.isArray(copiedPages2)) {
+            pages2 = copiedPages2;
+          } else if (copiedPages2 && typeof copiedPages2.length !== 'undefined') {
+            for (var j = 0; j < copiedPages2.length; j++) {
+              if (copiedPages2[j] !== undefined && copiedPages2[j] !== null) {
+                pages2.push(copiedPages2[j]);
+              }
+            }
+          } else if (copiedPages2) {
+            pages2 = [copiedPages2];
+          }
+          
+          // Add each page from first copy to merged document
+          for (var k = 0; k < pages1.length; k++) {
+            if (pages1[k] && typeof pages1[k] === 'object') {
+              try {
+                mergedPdfDoc.addPage(pages1[k]);
+              } catch (addError) {
+                log.error('processPDFs', 'Error adding page (first copy): ' + addError.toString());
+              }
             }
           }
-        } else if (copiedPages) {
-          pages = [copiedPages];
-        }
-        
-        // Add each page to merged document
-        for (var k = 0; k < pages.length; k++) {
-          if (pages[k] && typeof pages[k] === 'object') {
-            try {
-              mergedPdfDoc.addPage(pages[k]);
-            } catch (addError) {
-              log.error('processPDFs', 'Error adding page: ' + addError.toString());
+          
+          // Add each page from second copy to merged document (duplicate for other side of pallet)
+          for (var k = 0; k < pages2.length; k++) {
+            if (pages2[k] && typeof pages2[k] === 'object') {
+              try {
+                mergedPdfDoc.addPage(pages2[k]);
+              } catch (addError) {
+                log.error('processPDFs', 'Error adding page (second copy): ' + addError.toString());
+              }
             }
           }
-        }
+          
+          log.debug('processPDFs', 'Added ' + (pages1.length * 2) + ' page(s) from PDF (duplicated for both sides of pallet)');
+          
+          // Continue with next PDF
+          return processPDFs(loadPromises.slice(1), mergedPdfDoc, duplicatePages);
+          
+        }).catch(function(copyError) {
+          log.error('processPDFs', 'Error copying pages: ' + copyError.toString());
+          // Continue with next PDF even if this one failed
+          return processPDFs(loadPromises.slice(1), mergedPdfDoc, duplicatePages);
+        });
+      } else {
+        // Original behavior - single copy (for carton labels or other uses)
+        var copyResult = mergedPdfDoc.copyPages(sourcePdfDoc, pageIndices);
+        var copyPromise = (copyResult && typeof copyResult.then === 'function') 
+          ? copyResult 
+          : Promise.resolve(copyResult);
         
-        log.debug('processPDFs', 'Added ' + pages.length + ' page(s) from PDF');
-        
-        // Continue with next PDF
-        return processPDFs(loadPromises.slice(1), mergedPdfDoc);
-        
-      }).catch(function(copyError) {
-        log.error('processPDFs', 'Error copying pages: ' + copyError.toString());
-        // Continue with next PDF even if this one failed
-        return processPDFs(loadPromises.slice(1), mergedPdfDoc);
-      });
+        return copyPromise.then(function(copiedPages) {
+          // Handle different return types from copyPages
+          var pages = [];
+          if (Array.isArray(copiedPages)) {
+            pages = copiedPages;
+          } else if (copiedPages && typeof copiedPages.length !== 'undefined') {
+            for (var j = 0; j < copiedPages.length; j++) {
+              if (copiedPages[j] !== undefined && copiedPages[j] !== null) {
+                pages.push(copiedPages[j]);
+              }
+            }
+          } else if (copiedPages) {
+            pages = [copiedPages];
+          }
+          
+          // Add each page to merged document
+          for (var k = 0; k < pages.length; k++) {
+            if (pages[k] && typeof pages[k] === 'object') {
+              try {
+                mergedPdfDoc.addPage(pages[k]);
+              } catch (addError) {
+                log.error('processPDFs', 'Error adding page: ' + addError.toString());
+              }
+            }
+          }
+          
+          log.debug('processPDFs', 'Added ' + pages.length + ' page(s) from PDF');
+          
+          // Continue with next PDF
+          return processPDFs(loadPromises.slice(1), mergedPdfDoc, duplicatePages);
+          
+        }).catch(function(copyError) {
+          log.error('processPDFs', 'Error copying pages: ' + copyError.toString());
+          // Continue with next PDF even if this one failed
+          return processPDFs(loadPromises.slice(1), mergedPdfDoc, duplicatePages);
+        });
+      }
       
     }).catch(function(loadError) {
       log.error('processPDFs', 'Error loading PDF: ' + loadError.toString());
       // Continue with next PDF
-      return processPDFs(loadPromises.slice(1), mergedPdfDoc);
+      return processPDFs(loadPromises.slice(1), mergedPdfDoc, duplicatePages);
     });
   }
   

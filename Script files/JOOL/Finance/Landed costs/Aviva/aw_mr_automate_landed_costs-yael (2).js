@@ -1,6 +1,12 @@
 /**
  * @NApiVersion 2.1
  * @NScriptType MapReduceScript
+ * 
+ * Change Log:
+ * Date: 1-13-2026
+ * Developer: David Hodes
+ * Description: Updated duty fees allocation to use value-based mode instead of CBM, like tarrif/duty fees
+ * Requested by: Hadas
  */
 define(['N/record','N/query','N/runtime','N/log'], function (record, query, runtime, log) {
 
@@ -64,7 +70,8 @@ define(['N/record','N/query','N/runtime','N/log'], function (record, query, runt
 ]
   const PARAM_BILL_ID = 'custscript_ir_id';
   const FIELD_ASSOC_IR = 'custcol_related_ir';
-  const DUTY_ITEM_ID = 635; // "Tariff/Duty" -> value mode
+  const TARIFF_DUTY_FEES = 635; // "Tariff/Duty" -> value mode
+  const DUTY_FEES = 630; // "Duty Fees" -> value mode
 
   function getInputData() {
   const script = runtime.getCurrentScript();
@@ -143,7 +150,7 @@ log.debug('irid ' + irId);
          WHERE i.id = ${itemId}`
       ).asMappedResults();
 
-      var mode = (itemId == DUTY_ITEM_ID) ? 'value' : 'cbm';
+      var mode = (itemId == TARIFF_DUTY_FEES || itemId == DUTY_FEES) ? 'value' : 'cbm';
 log.debug('finished working')
       work.push({
         irId,

@@ -270,12 +270,12 @@ define([
       if (locationName) fileName += ' - ' + locationName;
       fileName += '.pdf';
       
-      // Call merge library function
+      // Call merge library function with duplicatePages = true for pallet labels
       // Note: mergePDFs returns a Promise (PDFlib is async)
       // In SuiteScript Map/Reduce, we cannot reliably wait for Promises
       // The Promise callback may execute after reduce() exits
       // Solution: Handle all work inside the Promise callback
-      var mergeResult = pdfMerger.mergePDFs(fileIds, fileName, PDF_FOLDER_ID);
+      var mergeResult = pdfMerger.mergePDFs(fileIds, fileName, PDF_FOLDER_ID, true);
       
       if (!mergeResult || typeof mergeResult.then !== 'function') {
         log.error('reduce', 'IF ' + ifTranId + ' - mergePDFs did not return a Promise');

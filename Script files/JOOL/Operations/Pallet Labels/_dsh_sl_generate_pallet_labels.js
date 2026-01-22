@@ -212,9 +212,9 @@ define([
       
       log.debug('onRequest', 'Merging ' + fileIds.length + ' PDF(s) into: ' + fileName);
       
-      // Merge PDFs using PDF merger library
+      // Merge PDFs using PDF merger library with duplicatePages = true for pallet labels
       // Note: mergePDFs returns a Promise - handle all response writing inside the callback
-      var mergeResult = pdfMerger.mergePDFs(fileIds, fileName, PDF_FOLDER_ID);
+      var mergeResult = pdfMerger.mergePDFs(fileIds, fileName, PDF_FOLDER_ID, true);
       
       if (!mergeResult || typeof mergeResult.then !== 'function') {
         var errorMsg = 'PDF merger did not return a Promise';

@@ -167,18 +167,39 @@ define([
           // Get units per pallet based on location
           var unitsPerPallet = 0;
           var uppFieldValue = null;
+          var isUPPEmpty = false;
+          
           if (parseInt(locationId) === 4) { // Westmark
             uppFieldValue = itemRecord.getValue('custitem_units_per_pallet_westmark');
-            unitsPerPallet = uppFieldValue || 1;
           } else if (parseInt(locationId) === 38) { // Rutgers
             uppFieldValue = itemRecord.getValue('custitemunits_per_pallet');
-            unitsPerPallet = uppFieldValue || 1;
           } else {
+            // For other locations, default to 1
             unitsPerPallet = 1;
           }
           
-          // Check if UPP is missing/null/empty (defaulted to 1)
-          if (!uppFieldValue || uppFieldValue === 0 || uppFieldValue === '') {
+          // Check if UPP is missing/null/empty - DO NOT DEFAULT TO 1
+          // More comprehensive check to catch all empty cases including whitespace
+          if (uppFieldValue !== null && uppFieldValue !== undefined) {
+            if (typeof uppFieldValue === 'string') {
+              // Check for empty string or whitespace-only string
+              isUPPEmpty = uppFieldValue.trim() === '';
+            } else {
+              // Check if it's a valid number
+              var parsedValue = parseFloat(uppFieldValue);
+              if (isNaN(parsedValue) || parsedValue <= 0) {
+                isUPPEmpty = true;
+              } else {
+                unitsPerPallet = parsedValue;
+              }
+            }
+          } else {
+            // null or undefined
+            isUPPEmpty = true;
+          }
+          
+          // If UPP is empty, flag it and DO NOT use it in pallet calculations
+          if (isUPPEmpty) {
             hasMissingUPP = true;
             var locationName = locationRecord.getValue('name') || locationId;
             missingUPPItems.push({
@@ -190,33 +211,35 @@ define([
             });
             log.audit('Routing Calculator - Missing UPP', 
                         'Item ' + itemName + ' (ID: ' + itemId + ') has missing/null/empty units per pallet field. ' +
-                        'Location: ' + locationId + ' (' + locationName + '), Defaulting to 1 unit per pallet. ' +
-                        'Routing status will NOT be set to 1.');
-          }
-          
-          // Calculate individual pallet fraction (for debugging)
-          var individualPalletFraction = 0;
-          if (unitsPerPallet > 0) {
-            individualPalletFraction = itemQuantity / unitsPerPallet;
+                        'Location: ' + locationId + ' (' + locationName + '). ' +
+                        'Item will be EXCLUDED from pallet calculations. Routing status will be set to 4 (error requesting).');
+            // DO NOT add this item to itemData for pallet calculations
+            // Still process it for cartons/volume/weight, but skip pallet calculation
           } else {
-            individualPalletFraction = itemQuantity;
+            // UPP is valid, calculate individual pallet fraction and add to itemData
+            var individualPalletFraction = 0;
+            if (unitsPerPallet > 0) {
+              individualPalletFraction = itemQuantity / unitsPerPallet;
+            } else {
+              individualPalletFraction = itemQuantity;
+            }
+            
+            itemData.push({
+              itemId: itemId,
+              itemName: itemName,
+              quantity: parseFloat(itemQuantity) || 0,  // Ensure quantity is a number
+              unitsPerPallet: parseFloat(unitsPerPallet) || 1,  // Ensure unitsPerPallet is a number
+              individualPalletFraction: individualPalletFraction
+            });
+            
+            log.debug('Routing Calculator - Pallet Debug', 
+                      'Line ' + i + ': ' + itemName + 
+                      ' - Qty: ' + itemQuantity + 
+                      ', Units/Pallet: ' + unitsPerPallet +
+                      ', Individual Pallet Fraction: ' + individualPalletFraction.toFixed(3));
           }
-          
-          itemData.push({
-            itemId: itemId,
-            itemName: itemName,
-            quantity: parseFloat(itemQuantity) || 0,  // Ensure quantity is a number
-            unitsPerPallet: parseFloat(unitsPerPallet) || 1,  // Ensure unitsPerPallet is a number
-            individualPalletFraction: individualPalletFraction
-          });
           
           totalUnits += itemQuantity;
-          
-          log.debug('Routing Calculator - Pallet Debug', 
-                    'Line ' + i + ': ' + itemName + 
-                    ' - Qty: ' + itemQuantity + 
-                    ', Units/Pallet: ' + unitsPerPallet +
-                    ', Individual Pallet Fraction: ' + individualPalletFraction.toFixed(3));
         }
       }
       
@@ -345,6 +368,7 @@ define([
       // Calculate and set pickup date from IF MABD (2 business days before MABD)
       var pickupDateSet = false;
       var pickupDateError = false; // Track if pickup date couldn't be set
+      var pickupDateErrorMessage = null; // Store pickup date error message to combine with other errors
       try {
         // Get MABD directly from Item Fulfillment
         var mabdDate = ifRecord.getValue('custbody_gbs_mabd');
@@ -362,37 +386,55 @@ define([
             pickupDateSet = true;
             log.debug('Routing Calculator', 'Set pickup date to ' + formatDateForLog(pickupDateResult.date));
           } else {
-            // Set error message in field instead of sending email
+            // Store error message to combine with other errors later
             pickupDateError = true;
-            var errorMessage = 'Pickup date could not be set. Reason: ' + pickupDateResult.reason;
+            pickupDateErrorMessage = 'Pickup date could not be set. Reason: ' + pickupDateResult.reason;
             if (mabdDate) {
-              errorMessage += ' (MABD: ' + formatDateForLog(new Date(mabdDate)) + ')';
+              pickupDateErrorMessage += ' (MABD: ' + formatDateForLog(new Date(mabdDate)) + ')';
             }
-            ifRecord.setValue({
-              fieldId: 'custbody_routing_request_issue',
-              value: errorMessage
-            });
-            log.debug('Routing Calculator', 'Pickup date could not be set. Reason: ' + pickupDateResult.reason + '. Set error message in custbody_routing_request_issue field.');
+            log.debug('Routing Calculator', 'Pickup date could not be set. Reason: ' + pickupDateResult.reason + '. Will combine with other errors in error message field.');
           }
         } else {
-          // Set error message in field instead of sending email
+          // Store error message to combine with other errors later
           pickupDateError = true;
-          var errorMessage = 'MABD date is missing on the Item Fulfillment';
-          ifRecord.setValue({
-            fieldId: 'custbody_routing_request_issue',
-            value: errorMessage
-          });
-          log.debug('Routing Calculator', 'MABD date is missing on Item Fulfillment. Set error message in custbody_routing_request_issue field.');
+          pickupDateErrorMessage = 'MABD date is missing on the Item Fulfillment';
+          log.debug('Routing Calculator', 'MABD date is missing on Item Fulfillment. Will combine with other errors in error message field.');
         }
       } catch (dateError) {
         pickupDateError = true;
         log.error('Routing Calculator', 'Error setting pickup date: ' + dateError.toString());
-        // Set error message in field instead of sending email
-        var errorMessage = 'Error setting pickup date: ' + dateError.toString();
-        ifRecord.setValue({
-          fieldId: 'custbody_routing_request_issue',
-          value: errorMessage
-        });
+        // Store error message to combine with other errors later
+        pickupDateErrorMessage = 'Error setting pickup date: ' + dateError.toString();
+      }
+      
+      // Build combined error message from all errors (pickup date, UPP, carton weight)
+      var allErrorMessages = [];
+      
+      // Add pickup date error if present
+      if (pickupDateErrorMessage) {
+        allErrorMessages.push(pickupDateErrorMessage);
+      }
+      
+      // Add UPP error if present
+      if (hasMissingUPP) {
+        var uppErrorMsg = 'Missing Units Per Pallet (UPP) fields. Location: ' + locationName + '. Items: ';
+        var uppItemNames = [];
+        for (var u = 0; u < missingUPPItems.length; u++) {
+          uppItemNames.push(missingUPPItems[u].itemName + ' (ID: ' + missingUPPItems[u].itemId + ')');
+        }
+        uppErrorMsg += uppItemNames.join(', ');
+        allErrorMessages.push(uppErrorMsg);
+      }
+      
+      // Add carton weight error if present
+      if (hasMissingCartonWeight) {
+        var weightErrorMsg = 'Missing carton weight fields. Location: ' + locationName + '. Items: ';
+        var weightItemNames = [];
+        for (var w = 0; w < missingCartonWeightItems.length; w++) {
+          weightItemNames.push(missingCartonWeightItems[w].itemName + ' (ID: ' + missingCartonWeightItems[w].itemId + ')');
+        }
+        weightErrorMsg += weightItemNames.join(', ');
+        allErrorMessages.push(weightErrorMsg);
       }
       
       // Set routing status based on conditions
@@ -403,55 +445,36 @@ define([
           value: 1
         });
         log.debug('Routing Calculator', 'Set routing status to 1 (ready for routing request)');
-      } else if (pickupDateError) {
-        // Set routing status to 4 when pickup date cannot be set
-        ifRecord.setValue({
-          fieldId: 'custbody_routing_status',
-          value: 4
-        });
-        log.debug('Routing Calculator', 'Set routing status to 4 (pickup date could not be set)');
-      } else if (hasMissingUPP || hasMissingCartonWeight) {
-        // Set routing status to 4 when UPP or carton weight is missing
+      } else {
+        // Set routing status to 4 when any error occurs (pickup date, UPP, or carton weight)
         ifRecord.setValue({
           fieldId: 'custbody_routing_status',
           value: 4
         });
         
-        // Build combined error message
-        var errorMessages = [];
-        
-        if (hasMissingUPP) {
-          var uppErrorMsg = 'Missing Units Per Pallet (UPP) fields. Location: ' + locationName + '. Items: ';
-          var uppItemNames = [];
-          for (var u = 0; u < missingUPPItems.length; u++) {
-            uppItemNames.push(missingUPPItems[u].itemName + ' (ID: ' + missingUPPItems[u].itemId + ')');
+        // Set combined error message if there are any errors
+        if (allErrorMessages.length > 0) {
+          var combinedErrorMsg = allErrorMessages.join(' | ');
+          ifRecord.setValue({
+            fieldId: 'custbody_routing_request_issue',
+            value: combinedErrorMsg
+          });
+          
+          var errorTypes = [];
+          if (pickupDateError) errorTypes.push('pickup date');
+          if (hasMissingUPP) errorTypes.push('missing UPP');
+          if (hasMissingCartonWeight) errorTypes.push('missing carton weight');
+          
+          log.debug('Routing Calculator', 'Set routing status to 4 due to: ' + errorTypes.join(', ') + '. Combined error message set in custbody_routing_request_issue field.');
+          
+          if (hasMissingUPP || hasMissingCartonWeight) {
+            log.audit('Routing Calculator', 
+                        'Set routing status to 4 (error requesting) because one or more items have missing/null/empty units per pallet or carton weight fields. ' +
+                        'Please update item fields and recalculate routing.');
           }
-          uppErrorMsg += uppItemNames.join(', ');
-          errorMessages.push(uppErrorMsg);
+        } else if (!pickupDateSet) {
+          log.debug('Routing Calculator', 'NOT setting routing status to 1 because pickup date was not set');
         }
-        
-        if (hasMissingCartonWeight) {
-          var weightErrorMsg = 'Missing carton weight fields. Location: ' + locationName + '. Items: ';
-          var weightItemNames = [];
-          for (var w = 0; w < missingCartonWeightItems.length; w++) {
-            weightItemNames.push(missingCartonWeightItems[w].itemName + ' (ID: ' + missingCartonWeightItems[w].itemId + ')');
-          }
-          weightErrorMsg += weightItemNames.join(', ');
-          errorMessages.push(weightErrorMsg);
-        }
-        
-        var combinedErrorMsg = errorMessages.join(' | ');
-        ifRecord.setValue({
-          fieldId: 'custbody_routing_request_issue',
-          value: combinedErrorMsg
-        });
-        
-        log.debug('Routing Calculator', 'Missing UPP or carton weight detected. Set routing status to 4 and error message in custbody_routing_request_issue field.');
-        log.audit('Routing Calculator', 
-                    'Set routing status to 4 (error requesting) because one or more items have missing/null/empty units per pallet or carton weight fields. ' +
-                    'Please update item fields and recalculate routing.');
-      } else if (!pickupDateSet) {
-        log.debug('Routing Calculator', 'NOT setting routing status to 1 because pickup date was not set');
       }
       
       // Save the record
@@ -469,11 +492,11 @@ define([
   
   /**
    * Calculates the requested pickup date from SO MABD date
-   * Calculates 2 business days before MABD (excluding Saturday and Sunday)
-   * Requires minimum 2 business days in the future from today
-   * Requires minimum 2 business days before MABD
-   * If the calculated date falls on a weekend, moves it forward to the next business day
-   * Only leaves blank if date is forced to be within 2 business days from today or less than 2 business days before MABD
+   * NEW LOGIC:
+   * 1. Start 2 business days from today going forward (Amazon hard rule: cannot be < 2 days ahead)
+   * 2. Calculate maximum pickup date = 2 business days before MABD
+   * 3. If minimum <= maximum, use maximum (push as far as possible)
+   * 4. If minimum > maximum (can't meet both constraints), use minimum (hard rule is 2 days from today)
    * @param {Date|string} mabdDate - The MABD date from the SO
    * @returns {Object} - Object with {date: Date|null, reason: string|null} - reason is null if date is set, contains error message if not
    */
@@ -483,16 +506,6 @@ define([
         return {date: null, reason: 'MABD date is missing or invalid'};
       }
       
-      // Calculate 2 business days before MABD (changed from 1 to meet requirement of at least 2 business days before MABD)
-      var pickupDateObj = calculateBusinessDaysBefore(mabdDate, 2);
-      
-      if (!pickupDateObj) {
-        return {date: null, reason: 'Unable to calculate 2 business days before MABD'};
-      }
-      
-      // Set time to midnight for comparison
-      pickupDateObj.setHours(0, 0, 0, 0);
-      
       // Get current date and MABD date for comparison
       var today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -501,49 +514,61 @@ define([
       mabdDateObj.setHours(0, 0, 0, 0);
       
       log.debug('Routing Calculator - Pickup Date Debug', '=== PICKUP DATE CALCULATION DEBUG ===');
-      log.debug('Routing Calculator - Pickup Date Debug', 'MABD Date: ' + formatDateForLog(mabdDateObj));
-      log.debug('Routing Calculator - Pickup Date Debug', 'Initial calculated pickup date (2 business days before MABD): ' + formatDateForLog(pickupDateObj));
       log.debug('Routing Calculator - Pickup Date Debug', 'Today: ' + formatDateForLog(today));
+      log.debug('Routing Calculator - Pickup Date Debug', 'MABD Date: ' + formatDateForLog(mabdDateObj));
       
-      // If pickup date falls on a weekend, move it forward to the next business day
-      var dayOfWeek = pickupDateObj.getDay();
-      if (dayOfWeek === 0 || dayOfWeek === 6) {
-        log.debug('Routing Calculator - Pickup Date Debug', 'Pickup date falls on weekend (' + (dayOfWeek === 0 ? 'Sunday' : 'Saturday') + '), moving forward to next business day');
-        pickupDateObj = moveToNextBusinessDay(pickupDateObj);
-        log.debug('Routing Calculator - Pickup Date Debug', 'Adjusted pickup date after weekend move: ' + formatDateForLog(pickupDateObj));
+      // Step 1: Calculate minimum pickup date = 2 business days from today (forward)
+      // This is the hard rule - Amazon does not allow requests < 2 days ahead
+      var minPickupDate = calculateBusinessDaysAfter(today, 2);
+      
+      if (!minPickupDate) {
+        return {date: null, reason: 'Unable to calculate 2 business days from today'};
       }
       
-      // CRITICAL: Check if pickup date is BEFORE today (in the past)
-      if (pickupDateObj < today) {
-        var reason = 'Pickup date is in the past. Calculated date: ' + formatDateForLog(pickupDateObj) + ', Today: ' + formatDateForLog(today) + '. This occurs when MABD is in the past or too close to today.';
+      // Ensure it's a business day (move forward if weekend)
+      minPickupDate = moveToNextBusinessDay(minPickupDate);
+      minPickupDate.setHours(0, 0, 0, 0);
+      
+      log.debug('Routing Calculator - Pickup Date Debug', 'Minimum pickup date (2 business days from today): ' + formatDateForLog(minPickupDate));
+      
+      // Step 2: Calculate maximum pickup date = 2 business days before MABD (backward)
+      var maxPickupDate = calculateBusinessDaysBefore(mabdDateObj, 2);
+      
+      if (!maxPickupDate) {
+        return {date: null, reason: 'Unable to calculate 2 business days before MABD'};
+      }
+      
+      // Ensure it's a business day (move forward if weekend)
+      maxPickupDate = moveToNextBusinessDay(maxPickupDate);
+      maxPickupDate.setHours(0, 0, 0, 0);
+      
+      log.debug('Routing Calculator - Pickup Date Debug', 'Maximum pickup date (2 business days before MABD): ' + formatDateForLog(maxPickupDate));
+      
+      // Step 3: Determine final pickup date
+      var finalPickupDate = null;
+      
+      if (minPickupDate <= maxPickupDate) {
+        // We can meet both constraints - use maximum (push as far as possible)
+        finalPickupDate = maxPickupDate;
+        log.debug('Routing Calculator - Pickup Date Debug', 'Using maximum pickup date (can meet both constraints): ' + formatDateForLog(finalPickupDate));
+      } else {
+        // Cannot meet both constraints - use minimum (hard rule is 2 days from today)
+        finalPickupDate = minPickupDate;
+        log.debug('Routing Calculator - Pickup Date Debug', 'Using minimum pickup date (cannot meet both constraints, hard rule is 2 days from today): ' + formatDateForLog(finalPickupDate));
+        log.debug('Routing Calculator - Pickup Date Debug', 'Note: This date may be within 2 days or on MABD, but hard rule requires minimum 2 days from today.');
+      }
+      
+      // Final validation: Ensure pickup date is not in the past (shouldn't happen, but safety check)
+      if (finalPickupDate < today) {
+        var reason = 'Calculated pickup date is in the past. Date: ' + formatDateForLog(finalPickupDate) + ', Today: ' + formatDateForLog(today);
         log.debug('Routing Calculator - Pickup Date Debug', 'REJECTED: ' + reason);
         return {date: null, reason: reason};
       }
       
-      // Check if pickup date is at least 2 business days from today
-      // Note: countBusinessDaysBetween is inclusive, so if today is Monday and pickup is Tuesday, count = 2
-      // We need at least 2 business days in the future, so count must be > 2 (meaning at least Wednesday)
-      var businessDaysFromToday = countBusinessDaysBetween(today, pickupDateObj);
-      log.debug('Routing Calculator - Pickup Date Debug', 'Business days from today: ' + businessDaysFromToday + ' (needs to be > 2 for at least 2 business days in the future)');
-      if (businessDaysFromToday <= 2) {
-        var reason = 'Pickup date is not at least 2 business days from today. Calculated date: ' + formatDateForLog(pickupDateObj) + ', Today: ' + formatDateForLog(today);
-        log.debug('Routing Calculator - Pickup Date Debug', 'REJECTED: ' + reason);
-        return {date: null, reason: reason};
-      }
-      
-      // Check if pickup date is at least 2 business days before MABD
-      var businessDaysBeforeMABD = countBusinessDaysBetween(pickupDateObj, mabdDateObj);
-      log.debug('Routing Calculator - Pickup Date Debug', 'Business days before MABD: ' + businessDaysBeforeMABD + ' (needs to be > 1)');
-      if (businessDaysBeforeMABD <= 1) {
-        var reason = 'Pickup date is not at least 2 business days before MABD. Calculated date: ' + formatDateForLog(pickupDateObj) + ', MABD: ' + formatDateForLog(mabdDateObj);
-        log.debug('Routing Calculator - Pickup Date Debug', 'REJECTED: ' + reason);
-        return {date: null, reason: reason};
-      }
-      
-      log.debug('Routing Calculator - Pickup Date Debug', 'ACCEPTED: Pickup date is valid - ' + formatDateForLog(pickupDateObj));
+      log.debug('Routing Calculator - Pickup Date Debug', 'ACCEPTED: Final pickup date - ' + formatDateForLog(finalPickupDate));
       log.debug('Routing Calculator - Pickup Date Debug', '=== END PICKUP DATE CALCULATION DEBUG ===');
       
-      return {date: pickupDateObj, reason: null};
+      return {date: finalPickupDate, reason: null};
       
     } catch (e) {
       var errorMsg = 'Error calculating pickup date: ' + e.toString();
@@ -629,6 +654,47 @@ define([
     } catch (e) {
       log.error('Routing Calculator', 'Error counting business days: ' + e.toString());
       return 0;
+    }
+  }
+  
+  /**
+   * Calculates a date that is N business days after the given date (forward)
+   * Business days exclude Saturday (6) and Sunday (0)
+   * @param {Date|string} startDate - The starting date
+   * @param {number} businessDays - Number of business days to go forward
+   * @returns {Date|null} - Date object, or null if calculation fails
+   */
+  function calculateBusinessDaysAfter(startDate, businessDays) {
+    try {
+      var date = new Date(startDate);
+      if (isNaN(date.getTime())) {
+        log.error('Routing Calculator', 'Invalid date: ' + startDate);
+        return null;
+      }
+      
+      var daysToAdd = 0;
+      var businessDaysCounted = 0;
+      
+      while (businessDaysCounted < businessDays) {
+        daysToAdd++;
+        var checkDate = new Date(date);
+        checkDate.setDate(date.getDate() + daysToAdd);
+        
+        var dayOfWeek = checkDate.getDay();
+        if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+          businessDaysCounted++;
+        }
+      }
+      
+      var resultDate = new Date(date);
+      resultDate.setDate(date.getDate() + daysToAdd);
+      resultDate.setHours(0, 0, 0, 0);
+      
+      return resultDate;
+      
+    } catch (e) {
+      log.error('Routing Calculator', 'Error calculating business days forward: ' + e.toString());
+      return null;
     }
   }
   
