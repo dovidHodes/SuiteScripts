@@ -47,7 +47,8 @@ A comprehensive collection of NetSuite SuiteScript automation scripts and utilit
         ├── setAVCroutingIF_UE.js       # AVC routing User Event script
         ├── Finance/                    # Finance-related automation
         │   └── Landed costs/           # Landed cost automation
-        │       └── Aviva/             # Aviva-specific landed cost scripts
+        │       ├── Aviva - landec costs IR/ # Aviva landed cost Item Receipt scripts
+        │       └── Set Track Landed Cost - item record/ # Set track landed cost on item records
         ├── Operations/                 # Operations automation scripts
         │   ├── Add Packages to IF/    # Add packages to Item Fulfillment sublist
         │   ├── Approve AVC orders/     # AVC order approval automation
@@ -66,6 +67,8 @@ A comprehensive collection of NetSuite SuiteScript automation scripts and utilit
         │   ├── Pallet SSCC Generation/ # Pallet SSCC barcode generation
         │   ├── Pallet Volume Display/  # Pallet volume display User Event
         │   ├── Purchase order change/   # Purchase order status and SO linking
+        │   ├── Routing Instructions Intake/ # 754 record routing instructions processing
+        │   ├── 754 Location and SO Link/ # 754 record location and SO linking
         │   ├── SPS Scripts/            # SPS Commerce integration scripts
         │   │   ├── Autopack/           # SPS autopack functionality
         │   │   ├── Batch print/       # SPS batch label printing
@@ -288,6 +291,32 @@ Automated Purchase Order status management and Sales Order linking functionality
 - `custbody_status` = 3 → `transtatus` = 'C'
 
 See `Script files/JOOL/Operations/Purchase order change/README.md` for detailed documentation.
+
+### Routing Instructions Intake (754 Record)
+User Event scripts for processing custom transaction 754 (routing instructions) records.
+
+**Key Features:**
+- Location lookup by ship point value
+- Sales Order linking by PO number
+- Item Fulfillment creation based on pallet count matching
+- Location-based UPP (Units Per Pallet) calculation
+
+**Files:**
+- `Routing Instructions Intake/_dsh_ue_754_location_and_so_link.js` - User Event for location and SO linking on 754 records
+- `Routing Instructions Intake/754_IF_CREATION_PLAN.md` - Plan documentation for IF creation automation
+- `754 Location and SO Link/_dsh_ue_754_location_and_so_link.js` - Alternative implementation for 754 location and SO linking
+
+### 754 Location and SO Link
+User Event script that links locations and Sales Orders to 754 record lines.
+
+**Key Features:**
+- Ship point to location mapping
+- PO number to Sales Order lookup
+- Entity and date-based SO search
+- Comprehensive error handling
+
+**Files:**
+- `754 Location and SO Link/_dsh_ue_754_location_and_so_link.js` - User Event script for 754 record processing
 
 ### Time Tracker
 Centralized time tracking system for measuring automation savings.
