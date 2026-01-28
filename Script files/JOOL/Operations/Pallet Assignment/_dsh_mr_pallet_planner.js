@@ -18,8 +18,14 @@ define([
   'N/log',
   'N/task',
   'N/record',
-  './_dsh_lib_create_and_link_pallets'
-], function (runtime, log, task, record, palletLib) {
+  'N/search',
+  './_dsh_lib_create_and_link_pallets',
+  './_dsh_lib_time_tracker'
+], function (runtime, log, task, record, search, palletLib, timeTrackerLib) {
+  
+  // Time Tracker Constants
+  var ACTION_ID_PALLETS = 10;  // Action ID for pallet creation
+  var TIME_SAVED_PALLETS = 600;  // 10 minutes in seconds
   
   /**
    * Gets input data - receives IF IDs, splits into chunks of 5 IFs each
@@ -123,6 +129,29 @@ define([
           });
           
           processedIfIds.push(ifId);
+          
+          // Track time saved for pallet creation (10 minutes per IF)
+          try {
+            var ifLookup = search.lookupFields({
+              type: search.Type.ITEM_FULFILLMENT,
+              id: ifId,
+              columns: ['entity']
+            });
+            var customerId = ifLookup.entity && ifLookup.entity[0] ? ifLookup.entity[0].value : null;
+            
+            if (customerId) {
+              timeTrackerLib.addTimeTrackerLine({
+                actionId: ACTION_ID_PALLETS,
+                customerId: customerId,
+                timeSaved: TIME_SAVED_PALLETS
+              });
+              log.debug('map', 'IF ' + ifId + ' - Time tracked: 10 minutes for pallet creation');
+            }
+          } catch (timeError) {
+            log.error('map', 'IF ' + ifId + ' - Error tracking time: ' + timeError.toString());
+            // Continue processing - time tracking failure should not stop pallet creation
+          }
+          
           // Emit to output for tracking completion
           mapContext.write({
             key: result.ifId,

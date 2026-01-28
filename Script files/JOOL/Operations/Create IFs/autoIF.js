@@ -15,9 +15,8 @@ define([
     'N/log', 
     'N/record', 
     'N/error',
-    './_dsh_lib_time_tracker',  // Time tracker library - same SuiteScripts folder in NetSuite
-    './_dsh_lib_routing_calculator'  // Routing calculator library - same SuiteScripts folder in NetSuite
-], function (search, log, record, error, timeTrackerLib, routingLib) {
+    './_dsh_lib_time_tracker'  // Time tracker library - same SuiteScripts folder in NetSuite
+], function (search, log, record, error, timeTrackerLib) {
     
 
     function getInputData(inputContext) {
@@ -250,8 +249,8 @@ define([
                 log.debug('map', 'SO ' + tranId + ' has multiple locations (' + locationCount + '), will set custbody_is_split_shipment = true on all IFs');
             }
             
-            // Note: Pickup date calculation is handled by routingLib.calculateAndApplyRoutingFields() 
-            // after the IF is created, so we don't need to calculate it here
+            // Note: For entity 1716 (AVC), routing fields and pickup date are calculated by
+            // the post-autopack MR script (_dsh_mr_routing_from_packages.js) after SPS packages exist
             
             // Create one IF per location
             var ifResults = [];
@@ -446,30 +445,19 @@ define([
             
             log.debug('createItemFulfillment', 'IF saved as ' + ifTranId);
             
-            // If entity is 1716, run Amazon routing request AFTER saving
-            // Library handles everything: routing fields, pickup date, routing status
-            if (parseInt(entityId) === 1716) {
-                log.debug('createItemFulfillment', 'Entity is 1716, running Amazon routing request field population from IF quantities');
-                
-                // Calculate and apply routing fields using library (handles everything)
-                var routingSuccess = routingLib.calculateAndApplyRoutingFields(ifId);
-                
-                if (!routingSuccess) {
-                    log.warning('createItemFulfillment', 'Failed to calculate and apply routing fields for IF ' + ifTranId);
-                }
-            } else {
-                log.debug('createItemFulfillment', 'Entity is ' + entityId + ' (not 1716), skipping Amazon routing request');
-            }
+            // Note: For entity 1716 (AVC), routing fields are set by the post-autopack MR script
+            // (_dsh_mr_routing_from_packages.js) after SPS packages are created, NOT here.
+            // This ensures routing calculations use real SPS packages instead of simulated ones.
             
             log.audit('createItemFulfillment', 'Successfully created IF ' + ifTranId + ' for location ' + locationId + ' on SO ' + soTranIdValue);
             
             // Add time tracker lines for IF creation
             // Action ID 2 = "Create Item fulfillment" (2nd action in the list)
-            // Action ID 3 = "Request Routing" (3rd action in the list)
-            // Action ID 4 = "Populate routing" (4th action in the list)
+            // Action ID 3 = "Request Routing" (3rd action in the list) - NOT for 1716 (handled by post-autopack MR)
+            // Action ID 4 = "Populate routing" (4th action in the list) - NOT for 1716 (handled by post-autopack MR)
             try {
                 if (entityId) {
-                    // First time tracker line - Create IF (Employee 5)
+                    // Time tracker line - Create IF (Employee 5) - for ALL entities
                     try {
                         log.debug('Time Tracker - Create IF', 'Adding time tracker line for IF: ' + ifTranId + ', Customer: ' + entityId + ', Action: Create IF');
                         timeTrackerLib.addTimeTrackerLine({
@@ -483,32 +471,38 @@ define([
                         log.error('Time Tracker Error - Create IF', 'Failed to add time tracker line for employee 5: ' + timeTrackerError1.toString());
                     }
                     
-                    // Second time tracker line - Request Routing (Employee 5)
-                    try {
-                        log.debug('Time Tracker - Request Routing', 'Adding time tracker line for IF: ' + ifTranId + ', Customer: ' + entityId + ', Action: Request Routing');
-                        timeTrackerLib.addTimeTrackerLine({
-                            actionId: 3, // Request Routing action ID
-                            customerId: entityId,
-                            timeSaved: 5, // 5 seconds
-                            employeeId: 5
-                        });
-                        log.debug('Time Tracker - Request Routing', 'Successfully added time tracker line for employee 5, action 3');
-                    } catch (timeTrackerError2) {
-                        log.error('Time Tracker Error - Request Routing', 'Failed to add time tracker line for employee 5: ' + timeTrackerError2.toString());
-                    }
-                    
-                    // Third time tracker line - Populate routing back (Employee 5)
-                    try {
-                        log.debug('Time Tracker - Populate Routing Back', 'Adding time tracker line for IF: ' + ifTranId + ', Customer: ' + entityId + ', Action: Populate routing');
-                        timeTrackerLib.addTimeTrackerLine({
-                            actionId: 4, // Populate routing action ID
-                            customerId: entityId,
-                            timeSaved: 5, // 5 seconds
-                            employeeId: 5
-                        });
-                        log.debug('Time Tracker - Populate Routing Back', 'Successfully added time tracker line for employee 5, action 4');
-                    } catch (timeTrackerError3) {
-                        log.error('Time Tracker Error - Populate Routing Back', 'Failed to add time tracker line for employee 5: ' + timeTrackerError3.toString());
+                    // Request Routing and Populate routing time tracker lines - NOT for entity 1716
+                    // For 1716, routing is handled by the post-autopack MR script after SPS packages are created
+                    if (parseInt(entityId) !== 1716) {
+                        // Time tracker line - Request Routing (Employee 5)
+                        try {
+                            log.debug('Time Tracker - Request Routing', 'Adding time tracker line for IF: ' + ifTranId + ', Customer: ' + entityId + ', Action: Request Routing');
+                            timeTrackerLib.addTimeTrackerLine({
+                                actionId: 3, // Request Routing action ID
+                                customerId: entityId,
+                                timeSaved: 5, // 5 seconds
+                                employeeId: 5
+                            });
+                            log.debug('Time Tracker - Request Routing', 'Successfully added time tracker line for employee 5, action 3');
+                        } catch (timeTrackerError2) {
+                            log.error('Time Tracker Error - Request Routing', 'Failed to add time tracker line for employee 5: ' + timeTrackerError2.toString());
+                        }
+                        
+                        // Time tracker line - Populate routing back (Employee 5)
+                        try {
+                            log.debug('Time Tracker - Populate Routing Back', 'Adding time tracker line for IF: ' + ifTranId + ', Customer: ' + entityId + ', Action: Populate routing');
+                            timeTrackerLib.addTimeTrackerLine({
+                                actionId: 4, // Populate routing action ID
+                                customerId: entityId,
+                                timeSaved: 5, // 5 seconds
+                                employeeId: 5
+                            });
+                            log.debug('Time Tracker - Populate Routing Back', 'Successfully added time tracker line for employee 5, action 4');
+                        } catch (timeTrackerError3) {
+                            log.error('Time Tracker Error - Populate Routing Back', 'Failed to add time tracker line for employee 5: ' + timeTrackerError3.toString());
+                        }
+                    } else {
+                        log.debug('Time Tracker', 'Skipping Request Routing and Populate routing time tracker for entity 1716 - handled by post-autopack MR');
                     }
                 } else {
                     log.debug('Time Tracker', 'Skipping time tracker - no customer ID found on IF: ' + ifTranId);

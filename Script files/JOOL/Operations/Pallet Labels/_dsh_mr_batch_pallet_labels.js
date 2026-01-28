@@ -20,13 +20,18 @@ define([
   'N/file',
   'N/url',
   './_dsh_lib_pallet_label_generator',
-  './_dsh_lib_pdf_merger'
-], function (search, record, log, runtime, file, url, palletLabelLib, pdfMerger) {
+  './_dsh_lib_pdf_merger',
+  './_dsh_lib_time_tracker'
+], function (search, record, log, runtime, file, url, palletLabelLib, pdfMerger, timeTrackerLib) {
   
   // Configuration constants
   var PALLET_RECORD_TYPE = 'customrecord_asn_pallet';
   var PALLET_IF_FIELD = 'custrecord_parent_if';
   var PDF_FOLDER_ID = 2122;
+  
+  // Time Tracker Constants
+  var ACTION_ID_PALLET_LABELS = 11;  // Action ID for pallet label creation
+  var TIME_SAVED_PALLET_LABELS = 600;  // 10 minutes in seconds
   
   /**
    * Gets input data - searches for IFs and pallets
@@ -80,13 +85,14 @@ define([
           search.createColumn({ name: 'internalid' }),
           search.createColumn({ name: 'tranid' }),
           search.createColumn({ name: 'custbody_sps_ponum_from_salesorder' }),
-          search.createColumn({ name: 'custbody_ship_from_location' })
+          search.createColumn({ name: 'custbody_ship_from_location' }),
+          search.createColumn({ name: 'entity' })
         ]
       });
       
       // Collect all IF IDs
       var ifIds = [];
-      var ifDataMap = {}; // {ifId: {ifTranId, poNumber, locationId, locationName}}
+      var ifDataMap = {}; // {ifId: {ifTranId, poNumber, locationId, locationName, entityId}}
       
       try {
         ifSearch.run().each(function(result) {
@@ -95,13 +101,15 @@ define([
           var poNumber = result.getValue('custbody_sps_ponum_from_salesorder') || '';
           var locationId = result.getValue('custbody_ship_from_location') || '';
           var locationName = result.getText('custbody_ship_from_location') || '';
+          var entityId = result.getValue('entity') || '';
           
           ifIds.push(ifId);
           ifDataMap[ifId] = {
             ifTranId: ifTranId,
             poNumber: poNumber,
             locationId: locationId,
-            locationName: locationName
+            locationName: locationName,
+            entityId: entityId
           };
           
           return true;
@@ -167,7 +175,8 @@ define([
             ifId: parentIfId,
             ifTranId: ifData.ifTranId,
             poNumber: ifData.poNumber,
-            locationName: ifData.locationName || ''
+            locationName: ifData.locationName || '',
+            entityId: ifData.entityId || ''
           });
           
           return true;
@@ -215,7 +224,8 @@ define([
             ifId: palletData.ifId,
             ifTranId: palletData.ifTranId || palletData.ifId,
             poNumber: palletData.poNumber || '',
-            locationName: palletData.locationName || ''
+            locationName: palletData.locationName || '',
+            entityId: palletData.entityId || ''
           }
         });
       } else {
@@ -254,6 +264,7 @@ define([
       var ifTranId = firstValue.ifTranId || ifId;
       var poNumber = firstValue.poNumber || '';
       var locationName = firstValue.locationName || '';
+      var entityId = firstValue.entityId || '';
       
       for (var i = 0; i < reduceContext.values.length; i++) {
         var value = typeof reduceContext.values[i] === 'string' 
@@ -307,6 +318,22 @@ define([
               options: { enableSourcing: false, ignoreMandatoryFields: true }
             });
             log.audit('reduce', 'IF ' + ifTranId + ' - Processed ' + fileIds.length + ' pallet label(s). URL: ' + result.pdfUrl);
+            
+            // Track time saved for pallet label creation (10 minutes per IF)
+            if (entityId) {
+              try {
+                timeTrackerLib.addTimeTrackerLine({
+                  actionId: ACTION_ID_PALLET_LABELS,
+                  customerId: entityId,
+                  timeSaved: TIME_SAVED_PALLET_LABELS
+                });
+                log.debug('reduce', 'IF ' + ifTranId + ' - Time tracked: 10 minutes for pallet label creation');
+              } catch (timeError) {
+                log.error('reduce', 'IF ' + ifTranId + ' - Error tracking time: ' + timeError.toString());
+                // Continue - time tracking failure should not affect label processing
+              }
+            }
+            
             try {
               reduceContext.write({ key: ifId, value: 'merged' });
             } catch (writeError) {

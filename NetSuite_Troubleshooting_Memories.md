@@ -340,6 +340,37 @@ Brief description of what the script does.
 • Customer Name (entity ID): Description of specific logic
 ```
 
+## Time Tracker Action IDs
+
+### Action ID Reference
+The time tracker custom transaction tracks automation time savings. Each action has a unique internal ID:
+
+| Action ID | Description | Time Saved | Script |
+|-----------|-------------|------------|--------|
+| 8 | EDI Error Record Creation | Varies | Various EDI scripts |
+| 10 | Pallet Creation | 10 minutes (600 seconds) | `_dsh_mr_pallet_planner.js` |
+| 11 | Pallet Label Creation | 10 minutes (600 seconds) | `_dsh_mr_batch_pallet_labels.js` |
+
+### Usage Pattern
+```javascript
+// Import the time tracker library
+define(['N/record', 'N/log', './_dsh_lib_time_tracker'], function (record, log, timeTrackerLib) {
+  
+  // Add time tracker line
+  timeTrackerLib.addTimeTrackerLine({
+    actionId: 10,           // Required: Action ID from table above
+    customerId: customerId, // Required: Internal ID of the customer/trading partner
+    timeSaved: 600          // Required: Time saved in seconds (600 = 10 minutes)
+  });
+});
+```
+
+### Notes
+- Default employee ID is 5 (can be overridden via `employeeId` parameter)
+- Default time tracker record ID is 15829943
+- Time is tracked in seconds (e.g., 10 minutes = 600 seconds)
+- Always wrap time tracking in try/catch to prevent failures from blocking main script logic
+
 ---
 *Last Updated: [Current Date]*
 *Project: retrieve_and_attach_PODs.js* 

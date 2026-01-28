@@ -81,18 +81,20 @@ define([
                         newRecord.setValue('custbody_warehouse_location', locationResults[0]);
                         log.audit('beforeSubmit', 'Set custbody_warehouse_location to: ' + locationResults[0]);
                     } else if (locationResults.length === 0) {
-                        // No locations found - append error message
+                        // No locations found - append error message and set status to 'C'
                         var existingIssue = newRecord.getValue('custbody_issue') || '';
                         var errorMsg = 'Location lookup error: No locations found for ship point "' + shipPointValue + '"';
                         var newIssueValue = existingIssue ? (existingIssue + '\n' + errorMsg) : errorMsg;
                         newRecord.setValue('custbody_issue', newIssueValue);
+                        newRecord.setValue('transtatus', 'C');
                         log.audit('beforeSubmit', errorMsg);
                     } else {
-                        // Multiple locations found - append error message with IDs
+                        // Multiple locations found - append error message with IDs and set status to 'C'
                         var existingIssue = newRecord.getValue('custbody_issue') || '';
                         var errorMsg = 'Location lookup error: Multiple locations found for ship point "' + shipPointValue + '": ' + locationResults.join(', ');
                         var newIssueValue = existingIssue ? (existingIssue + '\n' + errorMsg) : errorMsg;
                         newRecord.setValue('custbody_issue', newIssueValue);
+                        newRecord.setValue('transtatus', 'C');
                         log.audit('beforeSubmit', errorMsg);
                     }
                 } catch (locationSearchError) {
@@ -102,6 +104,7 @@ define([
                     var errorMsg = 'Location lookup error: Search failed for ship point "' + shipPointValue + '" - ' + (locationSearchError.message || locationSearchError.toString());
                     var newIssueValue = existingIssue ? (existingIssue + '\n' + errorMsg) : errorMsg;
                     newRecord.setValue('custbody_issue', newIssueValue);
+                    newRecord.setValue('transtatus', 'C');
                 }
             } else {
                 log.debug('beforeSubmit', 'No ship point value found, skipping location lookup');
@@ -193,18 +196,20 @@ define([
                             });
                             log.audit('beforeSubmit', 'Line ' + i + ': Set custcol_754_sales_order to: ' + soResults[0]);
                         } else if (soResults.length === 0) {
-                            // No SOs found - append error message
+                            // No SOs found - append error message and set status to 'C'
                             var existingIssue = newRecord.getValue('custbody_issue') || '';
                             var errorMsg = 'Line ' + (i + 1) + ': No Sales Orders found for VPO "' + vpoNumber + '"';
                             var newIssueValue = existingIssue ? (existingIssue + '\n' + errorMsg) : errorMsg;
                             newRecord.setValue('custbody_issue', newIssueValue);
+                            newRecord.setValue('transtatus', 'C');
                             log.audit('beforeSubmit', 'Line ' + i + ': No SOs found for VPO: ' + vpoNumber);
                         } else {
-                            // Multiple SOs found - append error message
+                            // Multiple SOs found - append error message and set status to 'C'
                             var existingIssue = newRecord.getValue('custbody_issue') || '';
                             var errorMsg = 'Line ' + (i + 1) + ': Multiple Sales Orders found (' + soResults.length + ') for VPO "' + vpoNumber + '": ' + soResults.join(', ');
                             var newIssueValue = existingIssue ? (existingIssue + '\n' + errorMsg) : errorMsg;
                             newRecord.setValue('custbody_issue', newIssueValue);
+                            newRecord.setValue('transtatus', 'C');
                             log.audit('beforeSubmit', 'Line ' + i + ': Multiple SOs found (' + soResults.length + ') for VPO: ' + vpoNumber + ' - IDs: ' + soResults.join(', '));
                         }
                     } catch (lineError) {
@@ -223,7 +228,7 @@ define([
             throw e; // Re-throw to prevent record save if critical error
         }
     }
-    
+
     return {
         beforeSubmit: beforeSubmit
     };
