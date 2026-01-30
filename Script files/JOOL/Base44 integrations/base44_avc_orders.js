@@ -23,28 +23,19 @@ define([
         type: search.Type.TRANSACTION,
         filters: [
           ['type', 'anyof', 'SalesOrd'],
+          'AND',
           ['entity', 'anyof', entityId],
+          'AND',
           ['trandate', 'onorafter', startDate],
+          'AND',
           ['mainline', 'is', 'F'] // Only get item lines, not header
         ],
         columns: [
-          search.createColumn({
-            name: 'trandate',
-            join: 'transaction'
-          }),
-          search.createColumn({
-            name: 'otherrefnum',
-            join: 'transaction'
-          }),
-          search.createColumn({
-            name: 'custcol_sps_vendorpartnumber'
-          }),
-          search.createColumn({
-            name: 'quantity'
-          }),
-          search.createColumn({
-            name: 'custcol_orig_qty'
-          })
+          search.createColumn({ name: 'trandate' }),
+          search.createColumn({ name: 'otherrefnum' }),
+          search.createColumn({ name: 'custcol_sps_vendorpartnumber' }),
+          search.createColumn({ name: 'quantity' }),
+          search.createColumn({ name: 'custcol_orig_qty' })
         ]
       });
       
@@ -52,8 +43,8 @@ define([
       
       transactionLineSearch.run().each(function (result) {
         results.push({
-          trandate: result.getValue({ name: 'trandate', join: 'transaction' }) || '',
-          otherrefnum: result.getValue({ name: 'otherrefnum', join: 'transaction' }) || '',
+          trandate: result.getValue({ name: 'trandate' }) || '',
+          otherrefnum: result.getValue({ name: 'otherrefnum' }) || '',
           custcol_sps_vendorpartnumber: result.getValue({ name: 'custcol_sps_vendorpartnumber' }) || '',
           quantity: result.getValue({ name: 'quantity' }) || 0,
           custcol_orig_qty: result.getValue({ name: 'custcol_orig_qty' }) || 0
